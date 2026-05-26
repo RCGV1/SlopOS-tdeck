@@ -11,10 +11,12 @@
 #include "hal/prefs.h"
 #include "slop_mesh.h"
 #include "../diagnostics/debug_cfg.h"
+#include "../meshtastic/meshtastic_node.h"
 
 #include <SPIFFS.h>
 #include <Preferences.h>
 #include <time.h>
+#include <cstring>
 #include <Mesh.h>
 #include <helpers/SimpleMeshTables.h>
 #include <helpers/radiolib/RadioLibWrappers.h>
@@ -25,6 +27,8 @@
 #include <helpers/StaticPoolPacketManager.h>
 
 using slopos::mesh::MeshMessage;
+
+extern "C" uint32_t lv_timer_handler(void);
 
 // ════════════════════════════════════════════════════
 // Global objects
@@ -43,12 +47,20 @@ static SimpleMeshTables          tables;
 static ArduinoMillis             millis_clock;
 static StaticPoolPacketManager   pkt_mgr(16);
 static slopos::mesh::SlopMesh*   g_mesh = nullptr;
+static slopos::meshtastic::MeshtasticNode g_meshtastic;
 
 static bool initialized = false;
+static slopos::ProtocolMode active_protocol = slopos::ProtocolMode::MeshCore;
 static char own_name[32] = "SlopOS";
 static uint32_t last_advert_time = 0;
 static bool     last_advert_success = false;
 static bool     last_advert_used_gps = false;
+static slopos::meshtastic::FrequencyPlan meshtastic_plan = {};
+static uint32_t meshtastic_packet_id = 0;
+static bool     meshtastic_tx_pending = false;
+static bool     meshtastic_position_after_nodeinfo = false;
+
+static constexpr uint8_t MESHTASTIC_SYNC_WORD = 0x2b;
 
 // ════════════════════════════════════════════════════
 // Message queue
@@ -72,7 +84,7 @@ static void queue_push(const char* sender, const char* channel, const char* text
     msg_head = (msg_head + 1) % MAX_QUEUED;
     msg_count++;
     // Log as packet entry (accessible via Packets screen)
-    if (sender && sender[0] && g_mesh) {
+    if (sender && sender[0] && (g_mesh || active_protocol == slopos::ProtocolMode::Meshtastic)) {
         int rssi = (int)radio_driver.getLastRSSI();
         float snr = radio_driver.getLastSNR();
         const char* ptype = (channel && channel[0]) ? "CHANNEL" : "DM";
@@ -135,6 +147,140 @@ static void saveIdentity(::mesh::LocalIdentity& id) {
     }
 }
 
+static uint32_t nextMeshtasticPacketId() {
+    meshtastic_packet_id++;
+    if (meshtastic_packet_id == 0) meshtastic_packet_id = 1;
+    return meshtastic_packet_id;
+}
+
+static uint32_t makeMeshtasticNodeNum(const slopos::NodePrefs& p) {
+#if defined(ESP32)
+    uint64_t mac = ESP.getEfuseMac();
+    uint32_t node = static_cast<uint32_t>(mac & 0xFFFFFFFFu);
+    if (node > 3 && node != slopos::meshtastic::kBroadcastNode) return node;
+#endif
+    uint32_t hash = slopos::meshtastic::djb2Hash(p.node_name);
+    if (hash <= 3 || hash == slopos::meshtastic::kBroadcastNode) hash = 0x13572468u;
+    return hash;
+}
+
+static void makeShortName(const char* long_name, char* out, size_t out_len) {
+    if (!out || out_len == 0) return;
+    out[0] = '\0';
+    size_t pos = 0;
+    if (long_name) {
+        for (const char* p = long_name; *p && pos + 1 < out_len; ++p) {
+            char c = *p;
+            if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+            if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+                out[pos++] = c;
+            }
+        }
+    }
+    if (pos == 0 && out_len > 1) out[pos++] = 'S';
+    out[pos] = '\0';
+}
+
+static bool buildMeshtasticNodeInfoPayload(uint8_t* out, size_t out_len, size_t* written) {
+    if (!out || !written) return false;
+    meshtastic_User user = meshtastic_User_init_zero;
+    snprintf(user.id, sizeof(user.id), "!%08lX",
+             static_cast<unsigned long>(g_meshtastic.config().node_num));
+    strncpy(user.long_name, own_name, sizeof(user.long_name) - 1);
+    user.long_name[sizeof(user.long_name) - 1] = '\0';
+    makeShortName(own_name, user.short_name, sizeof(user.short_name));
+#if defined(ESP32)
+    uint64_t mac = ESP.getEfuseMac();
+    for (int i = 0; i < 6; ++i) {
+        user.macaddr[5 - i] = static_cast<pb_byte_t>((mac >> (8 * i)) & 0xFF);
+    }
+#endif
+    user.hw_model = meshtastic_HardwareModel_T_DECK;
+    user.role = meshtastic_Config_DeviceConfig_Role_CLIENT;
+    return slopos::meshtastic::encodeProtoMessage(&meshtastic_User_msg, &user,
+                                                  out, out_len, written);
+}
+
+static bool buildMeshtasticPositionPayload(uint8_t* out, size_t out_len, size_t* written) {
+    if (!out || !written || !slopos_gps_has_fix()) return false;
+    meshtastic_Position pos = meshtastic_Position_init_zero;
+    pos.has_latitude_i = true;
+    pos.latitude_i = static_cast<int32_t>(slopos_gps_latitude() * 10000000.0f);
+    pos.has_longitude_i = true;
+    pos.longitude_i = static_cast<int32_t>(slopos_gps_longitude() * 10000000.0f);
+    pos.has_altitude = true;
+    pos.altitude = static_cast<int32_t>(slopos_gps_altitude_m());
+    pos.time = rtc_clock.getCurrentTime();
+    pos.timestamp = pos.time;
+    pos.location_source = meshtastic_Position_LocSource_LOC_INTERNAL;
+    pos.altitude_source = meshtastic_Position_AltSource_ALT_INTERNAL;
+    pos.has_ground_speed = true;
+    pos.ground_speed = static_cast<uint32_t>(slopos_gps_speed_kn() * 0.514444f);
+    pos.has_ground_track = true;
+    pos.ground_track = static_cast<uint32_t>(slopos_gps_heading() * 100.0f);
+    pos.sats_in_view = slopos_gps_satellites();
+    pos.fix_quality = slopos_gps_fix_quality();
+    return slopos::meshtastic::encodeProtoMessage(&meshtastic_Position_msg, &pos,
+                                                  out, out_len, written);
+}
+
+static bool meshtasticStartFrame(const uint8_t* bytes, size_t len, const char* log_type) {
+    if (!initialized || active_protocol != slopos::ProtocolMode::Meshtastic ||
+        meshtastic_tx_pending || !bytes || len == 0 || len > slopos::meshtastic::kMaxLoRaFrameBytes) {
+        return false;
+    }
+    bool ok = radio_driver.startSendRaw(bytes, static_cast<int>(len));
+    if (ok) {
+        meshtastic_tx_pending = true;
+        slopos::mesh::pushPacketLog(own_name, 0, 0.0f, log_type ? log_type : "MTX");
+    }
+    return ok;
+}
+
+static bool meshtasticSendPayload(slopos::meshtastic::PortNum portnum,
+                                  uint32_t to,
+                                  const uint8_t* payload,
+                                  size_t payload_len,
+                                  bool want_response,
+                                  bool want_ack,
+                                  const char* log_type) {
+    uint8_t frame[slopos::meshtastic::kMaxLoRaFrameBytes];
+    size_t written = 0;
+    if (!g_meshtastic.buildDataBytes(portnum, payload, payload_len, to,
+                                     nextMeshtasticPacketId(), want_response, want_ack,
+                                     frame, sizeof(frame), &written)) {
+        return false;
+    }
+    return meshtasticStartFrame(frame, written, log_type);
+}
+
+static bool meshtasticSendPosition() {
+    uint8_t payload[slopos::meshtastic::kDataPayloadLen];
+    size_t payload_len = 0;
+    if (!buildMeshtasticPositionPayload(payload, sizeof(payload), &payload_len)) return false;
+    return meshtasticSendPayload(slopos::meshtastic::PortNum::Position,
+                                 slopos::meshtastic::kBroadcastNode,
+                                 payload, payload_len, false, false, "MTX_POS");
+}
+
+static bool meshtasticSendNodeInfo(bool want_replies) {
+    uint8_t payload[slopos::meshtastic::kDataPayloadLen];
+    size_t payload_len = 0;
+    if (!buildMeshtasticNodeInfoPayload(payload, sizeof(payload), &payload_len)) return false;
+    return meshtasticSendPayload(slopos::meshtastic::PortNum::NodeInfo,
+                                 slopos::meshtastic::kBroadcastNode,
+                                 payload, payload_len, want_replies, false, "MTX_INFO");
+}
+
+static void serviceLvglTimers() {
+    static uint32_t last_lvgl = 0;
+    uint32_t now = millis();
+    if (now - last_lvgl > 20) {
+        last_lvgl = now;
+        lv_timer_handler();
+    }
+}
+
 // ════════════════════════════════════════════════════
 // Public API
 // ════════════════════════════════════════════════════
@@ -183,6 +329,42 @@ void injectMessage(const char* sender, const char* channel, const char* text)
 #endif
 }
 
+slopos::ProtocolMode getProtocolMode() {
+    return active_protocol;
+}
+
+const char* getProtocolModeName() {
+    return slopos::protocolModeName(active_protocol);
+}
+
+bool setProtocolMode(slopos::ProtocolMode mode) {
+    slopos::NodePrefs p = slopos::prefs_get();
+    p.protocol_mode = mode;
+    slopos::prefs_set(p);
+    active_protocol = mode;
+    return true;
+}
+
+bool protocolSupportsDirectMessages() {
+    return true;
+}
+
+bool protocolSupportsContacts() {
+    return true;
+}
+
+bool protocolSupportsChannels() {
+    return true;
+}
+
+bool protocolSupportsAdvert() {
+    return true;
+}
+
+bool protocolSupportsTrace() {
+    return true;
+}
+
 bool init(bool spiffs_ok)
 {
     fallback_clock.begin();
@@ -190,6 +372,9 @@ bool init(bool spiffs_ok)
 
     // ── Radio configuration: use compile-time defaults if not configured ──
     const slopos::NodePrefs& p = slopos::prefs_get();
+    active_protocol = p.protocol_mode;
+    if (p.node_name[0]) setOwnName(p.node_name);
+
     float   freq     = p.configured ? p.freq  : LORA_FREQ;
     float   bw       = p.configured ? p.bw    : LORA_BW;
     int     sf       = p.configured ? p.sf    : LORA_SF;
@@ -227,6 +412,52 @@ bool init(bool spiffs_ok)
         return false;
     }
 
+    fast_rng.begin(radio_module.random(0x7FFFFFFF));
+    meshtastic_packet_id = static_cast<uint32_t>(radio_module.random(0x7FFFFFFF));
+    if (meshtastic_packet_id == 0) meshtastic_packet_id = 1;
+
+    if (active_protocol == slopos::ProtocolMode::Meshtastic) {
+        slopos::meshtastic::MeshtasticNode::Config cfg;
+        cfg.node_num = makeMeshtasticNodeNum(p);
+        cfg.region = static_cast<slopos::meshtastic::RegionCode>(p.meshtastic_region);
+        if (!slopos::meshtastic::getRegion(cfg.region)) cfg.region = slopos::meshtastic::RegionCode::US;
+        cfg.preset = static_cast<slopos::meshtastic::ModemPreset>(p.meshtastic_preset);
+        cfg.hop_limit = p.meshtastic_hop_limit;
+        strncpy(cfg.channel_name, p.meshtastic_channel, sizeof(cfg.channel_name) - 1);
+        cfg.channel_name[sizeof(cfg.channel_name) - 1] = '\0';
+        memset(cfg.psk, 0, sizeof(cfg.psk));
+        cfg.psk_len = p.meshtastic_psk_len;
+        if (cfg.psk_len > sizeof(cfg.psk)) cfg.psk_len = 1;
+        memcpy(cfg.psk, p.meshtastic_psk, cfg.psk_len);
+
+        if (!g_meshtastic.begin(cfg) || !g_meshtastic.getFrequencyPlan(&meshtastic_plan)) {
+            Serial.println("[mesh] ERROR: Meshtastic config failed");
+            return false;
+        }
+
+        radio_module.setFrequency(meshtastic_plan.frequency_mhz);
+        radio_module.setBandwidth(meshtastic_plan.params.bandwidth_khz);
+        radio_module.setSpreadingFactor(meshtastic_plan.params.spreading_factor);
+        radio_module.setCodingRate(meshtastic_plan.params.coding_rate);
+        radio_module.setOutputPower(meshtastic_plan.tx_power_dbm);
+        radio_module.setSyncWord(MESHTASTIC_SYNC_WORD);
+        radio_module.setPreambleLength(16);
+        radio_driver.begin();
+
+        initialized = true;
+#if SLOPOS_DEBUG_MESH
+        Serial.printf("[mesh] Meshtastic: %.3f MHz / %.1f kHz / SF%d / CR4/%d / %d dBm\n",
+                      meshtastic_plan.frequency_mhz,
+                      meshtastic_plan.params.bandwidth_khz,
+                      meshtastic_plan.params.spreading_factor,
+                      meshtastic_plan.params.coding_rate,
+                      meshtastic_plan.tx_power_dbm);
+#endif
+        pushPacketLog("SYSTEM", 0, 0.0f, "BOOT");
+        meshtasticSendNodeInfo(true);
+        return true;
+    }
+
     radio_module.setFrequency(freq);
     radio_module.setBandwidth(bw);
     radio_module.setSpreadingFactor(sf);
@@ -236,8 +467,6 @@ bool init(bool spiffs_ok)
     Serial.printf("[mesh] Radio: %.3f MHz / %.1f kHz / SF%d / CR4/%d / %d dBm\n",
                   freq, bw, sf, cr, tx_power);
 #endif
-
-    fast_rng.begin(radio_module.random(0x7FFFFFFF));
 
     g_mesh = new SlopMesh(radio_driver, millis_clock, fast_rng, rtc_clock, pkt_mgr, tables);
     if (!g_mesh) {
@@ -278,38 +507,85 @@ bool init(bool spiffs_ok)
     return true;
 }
 
-// ── LVGL timer forward declaration ───────────────────────
-// Called periodically during mesh loop to prevent UI stuttering.
-// Declared here rather than including lvgl.h to keep dependency light.
-extern "C" uint32_t lv_timer_handler(void);
-
 void loop()
 {
-    if (!initialized || !g_mesh) return;
+    if (!initialized) return;
+
+    if (active_protocol == slopos::ProtocolMode::Meshtastic) {
+        radio_driver.loop();
+        if (meshtastic_tx_pending && radio_driver.isSendComplete()) {
+            radio_driver.onSendFinished();
+            meshtastic_tx_pending = false;
+            pushPacketLog(own_name, 0, 0.0f, "MTX_DONE");
+            if (meshtastic_position_after_nodeinfo) {
+                meshtastic_position_after_nodeinfo = false;
+                meshtasticSendPosition();
+            }
+        }
+
+        if (!meshtastic_tx_pending) {
+            uint8_t bytes[slopos::meshtastic::kMaxLoRaFrameBytes];
+            int len = radio_driver.recvRaw(bytes, sizeof(bytes));
+            if (len > 0) {
+                int rssi = static_cast<int>(radio_driver.getLastRSSI());
+                float snr = radio_driver.getLastSNR();
+                uint32_t now = rtc_clock.getCurrentTime();
+                if (g_meshtastic.ingestBytes(bytes, static_cast<size_t>(len), rssi, snr, now)) {
+                    pushPacketLog("Meshtastic", rssi, snr, "MRX");
+                    slopos::meshtastic::MeshtasticNode::Message rx[4];
+                    int n = g_meshtastic.pollMessages(rx, 4);
+                    for (int i = 0; i < n; ++i) {
+                        char fallback[16];
+                        const char* sender = g_meshtastic.nameForNode(rx[i].from, fallback, sizeof(fallback));
+                        queue_push(sender, rx[i].channel, rx[i].text);
+                    }
+                }
+            }
+        }
+
+        rtc_clock.tick();
+        serviceLvglTimers();
+        return;
+    }
+
+    if (!g_mesh) return;
     g_mesh->loop();  // Dispatcher::loop() — fast, non-blocking
     rtc_clock.tick();
-
-    // Service LVGL timers so UI remains responsive even during
-    // sustained mesh activity (periodic adverts, packet bursts).
-    // Called at ~50 Hz to keep animations and input feedback smooth
-    // without adding meaningful overhead.
-    static uint32_t last_lvgl = 0;
-    uint32_t now = millis();
-    if (now - last_lvgl > 20) {
-        last_lvgl = now;
-        lv_timer_handler();
-    }
+    serviceLvglTimers();
 }
 
 // ── Send ────────────────────────────────────────
 
 bool sendMessage(const char* dest, const char* text) {
+    if (active_protocol == slopos::ProtocolMode::Meshtastic) {
+        if (!dest || !text || meshtastic_tx_pending) return false;
+        uint32_t node = 0;
+        if (!g_meshtastic.nodeNumForContact(dest, &node)) return false;
+        uint8_t frame[slopos::meshtastic::kMaxLoRaFrameBytes];
+        size_t written = 0;
+        if (!g_meshtastic.buildTextBytesTo(node, text, nextMeshtasticPacketId(),
+                                           frame, sizeof(frame), &written)) {
+            return false;
+        }
+        return meshtasticStartFrame(frame, written, "MTX_DM");
+    }
     bool ok = g_mesh ? g_mesh->sendTextTo(dest, text) : false;
     if (ok) pushPacketLog(own_name, 0, 0.0f, "TX_DM");
     return ok;
 }
 
 bool sendChannelMessage(const char* channel_name, const char* text) {
+    if (active_protocol == slopos::ProtocolMode::Meshtastic) {
+        if (!text || meshtastic_tx_pending) return false;
+        (void)channel_name;
+        uint8_t frame[slopos::meshtastic::kMaxLoRaFrameBytes];
+        size_t written = 0;
+        if (!g_meshtastic.buildTextBytes(text, nextMeshtasticPacketId(),
+                                         frame, sizeof(frame), &written)) {
+            return false;
+        }
+        return meshtasticStartFrame(frame, written, "MTX_CHAN");
+    }
     if (!g_mesh) return false;
     for (int i = 0; i < g_mesh->getChannelCount(); i++) {
         auto* ch = g_mesh->getChannel(i);
@@ -334,9 +610,25 @@ int pendingMessageCount() { return msg_count; }
 
 // ── Contacts ────────────────────────────────────
 
-int getContactCount() { return g_mesh ? g_mesh->getContactCount() : 0; }
+int getContactCount() {
+    if (active_protocol == slopos::ProtocolMode::Meshtastic) {
+        slopos::meshtastic::MeshtasticNode::Contact contacts[32];
+        return g_meshtastic.exportContacts(contacts, 32);
+    }
+    return g_mesh ? g_mesh->getContactCount() : 0;
+}
 
 int exportContacts(char names[][32], int max) {
+    if (active_protocol == slopos::ProtocolMode::Meshtastic) {
+        if (!names || max <= 0) return 0;
+        slopos::meshtastic::MeshtasticNode::Contact contacts[32];
+        int n = g_meshtastic.exportContacts(contacts, max < 32 ? max : 32);
+        for (int i = 0; i < n; ++i) {
+            strncpy(names[i], contacts[i].name, 31);
+            names[i][31] = '\0';
+        }
+        return n;
+    }
     if (!g_mesh) return 0;
     int n = 0;
     for (int i = 0; i < g_mesh->getContactCount() && n < max; i++) {
@@ -349,6 +641,18 @@ int exportContacts(char names[][32], int max) {
 // ContactInfo is declared in mesh_wrapper.h — exportContactsFull uses it
 
 int exportContactsFull(ContactInfo* out, int max) {
+    if (active_protocol == slopos::ProtocolMode::Meshtastic) {
+        if (!out || max <= 0) return 0;
+        slopos::meshtastic::MeshtasticNode::Contact contacts[32];
+        int n = g_meshtastic.exportContacts(contacts, max < 32 ? max : 32);
+        for (int i = 0; i < n; ++i) {
+            strncpy(out[i].name, contacts[i].name, sizeof(out[i].name) - 1);
+            out[i].name[sizeof(out[i].name) - 1] = '\0';
+            out[i].rssi = contacts[i].rssi;
+            out[i].last_seen = contacts[i].last_seen;
+        }
+        return n;
+    }
     if (!g_mesh) return 0;
     int n = 0;
     for (int i = 0; i < g_mesh->getContactCount() && n < max; i++) {
@@ -366,9 +670,18 @@ int exportContactsFull(ContactInfo* out, int max) {
 
 // ── Channels ────────────────────────────────────
 
-int getChannelCount() { return g_mesh ? g_mesh->getChannelCount() : 0; }
+int getChannelCount() {
+    if (active_protocol == slopos::ProtocolMode::Meshtastic) return g_meshtastic.configured() ? 1 : 0;
+    return g_mesh ? g_mesh->getChannelCount() : 0;
+}
 
 int exportChannels(char names[][32], int max) {
+    if (active_protocol == slopos::ProtocolMode::Meshtastic) {
+        if (!names || max <= 0 || !g_meshtastic.configured()) return 0;
+        strncpy(names[0], g_meshtastic.config().channel_name, 31);
+        names[0][31] = '\0';
+        return 1;
+    }
     if (!g_mesh) return 0;
     int n = 0;
     for (int i = 0; i < g_mesh->getChannelCount() && n < max; i++) {
@@ -379,14 +692,28 @@ int exportChannels(char names[][32], int max) {
 }
 
 bool addChannel(const char* name, const char* psk) {
+    if (active_protocol == slopos::ProtocolMode::Meshtastic) {
+        (void)psk;
+        if (!name || !name[0]) return false;
+        slopos::NodePrefs p = slopos::prefs_get();
+        strncpy(p.meshtastic_channel, name[0] == '#' ? name + 1 : name,
+                sizeof(p.meshtastic_channel) - 1);
+        p.meshtastic_channel[sizeof(p.meshtastic_channel) - 1] = '\0';
+        slopos::prefs_set(p);
+        return true;
+    }
     return g_mesh ? g_mesh->addChannel(name, psk) : false;
 }
 
 bool addHashtagChannel(const char* name) {
+    if (active_protocol == slopos::ProtocolMode::Meshtastic) {
+        return addChannel(name, nullptr);
+    }
     return g_mesh ? g_mesh->addHashtagChannel(name) : false;
 }
 
 bool joinPublicChannel() {
+    if (active_protocol == slopos::ProtocolMode::Meshtastic) return g_meshtastic.configured();
     return addChannel("Public", "izOH6cXN6mrJ5e26oRXNcg==");
 }
 
@@ -403,9 +730,9 @@ const char* getOwnName() { return own_name; }
 
 // ── Radio stats ─────────────────────────────────
 
-int getNoiseFloor()   { return g_mesh ? (int)radio_driver.getNoiseFloor() : -120; }
-int getLastRSSI()     { return g_mesh ? (int)radio_driver.getLastRSSI() : 0; }
-float getLastSNR()    { return g_mesh ? radio_driver.getLastSNR() : 0.0f; }
+int getNoiseFloor()   { return initialized ? (int)radio_driver.getNoiseFloor() : -120; }
+int getLastRSSI()     { return initialized ? (int)radio_driver.getLastRSSI() : 0; }
+float getLastSNR()    { return initialized ? radio_driver.getLastSNR() : 0.0f; }
 
 bool sendAdvert() {
     // Rate limit: reject calls within 10 seconds of the last successful advert.
@@ -420,6 +747,14 @@ bool sendAdvert() {
     bool has_fix = slopos_gps_has_fix();
     last_advert_time = getCurrentTime();
     last_advert_used_gps = has_fix;
+
+    if (active_protocol == slopos::ProtocolMode::Meshtastic) {
+        bool ok = meshtasticSendNodeInfo(true);
+        meshtastic_position_after_nodeinfo = ok && has_fix;
+        last_advert_success = ok;
+        if (ok) last_advert_ms = now_ms;
+        return ok;
+    }
 
     if (!g_mesh) {
         last_advert_success = false;
@@ -510,6 +845,23 @@ uint32_t makeEpoch(int year, int month, int day, int hour, int minute) {
 static uint32_t trace_tag_counter = 0;
 
 bool sendTrace(int contact_idx, uint32_t* out_tag) {
+    if (active_protocol == slopos::ProtocolMode::Meshtastic) {
+        slopos::meshtastic::MeshtasticNode::Contact contacts[32];
+        int n = g_meshtastic.exportContacts(contacts, 32);
+        if (contact_idx < 0 || contact_idx >= n) return false;
+        meshtastic_RouteDiscovery route = meshtastic_RouteDiscovery_init_zero;
+        uint8_t payload[slopos::meshtastic::kDataPayloadLen];
+        size_t payload_len = 0;
+        if (!slopos::meshtastic::encodeProtoMessage(&meshtastic_RouteDiscovery_msg, &route,
+                                                    payload, sizeof(payload), &payload_len)) {
+            return false;
+        }
+        uint32_t tag = ++trace_tag_counter;
+        if (out_tag) *out_tag = tag;
+        return meshtasticSendPayload(slopos::meshtastic::PortNum::TraceRoute,
+                                     contacts[contact_idx].node_num,
+                                     payload, payload_len, true, true, "MTX_TRACE");
+    }
     if (!g_mesh) return false;
     uint32_t tag = ++trace_tag_counter;
     if (out_tag) *out_tag = tag;
@@ -524,6 +876,9 @@ void getTracePath(uint8_t* snrs, uint8_t* hashes) {
 void clearTraceResult() { if (g_mesh) g_mesh->clearTraceResult(); }
 
 bool contactHasPath(int idx) {
+    if (active_protocol == slopos::ProtocolMode::Meshtastic) {
+        return idx >= 0 && idx < getContactCount();
+    }
     if (!g_mesh) return false;
     auto* c = g_mesh->getContact(idx);
     return c && c->out_path_len != OUT_PATH_UNKNOWN;
@@ -531,14 +886,19 @@ bool contactHasPath(int idx) {
 
 // ── Ping Nearby ────────────────────────────────
 bool sendPingNearby() {
+    if (active_protocol == slopos::ProtocolMode::Meshtastic) {
+        return meshtasticSendNodeInfo(true);
+    }
     return g_mesh ? g_mesh->sendPingNearby() : false;
 }
 
 bool pingIsActive() {
+    if (active_protocol == slopos::ProtocolMode::Meshtastic) return false;
     return g_mesh ? g_mesh->pingIsActive() : false;
 }
 
 bool pingOnCooldown() {
+    if (active_protocol == slopos::ProtocolMode::Meshtastic) return false;
     return g_mesh ? g_mesh->pingOnCooldown() : false;
 }
 

@@ -3,6 +3,8 @@
 
 #include "meshtastic_node.h"
 
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace slopos {
@@ -38,16 +40,23 @@ bool MeshtasticNode::getFrequencyPlan(FrequencyPlan* out) const
 
 bool MeshtasticNode::buildTextFrame(const char* text, uint32_t packet_id, PacketFrame* out) const
 {
+    return buildTextFrameTo(kBroadcastNode, text, packet_id, out);
+}
+
+bool MeshtasticNode::buildTextFrameTo(uint32_t to, const char* text, uint32_t packet_id, PacketFrame* out) const
+{
     if (!configured_ || !text || !out || packet_id == 0) return false;
 
     DataPacket data;
     if (!makeTextData(text, &data)) return false;
+    data.source = cfg_.node_num;
+    data.dest = to;
 
     PacketHeader header;
-    header.to = kBroadcastNode;
+    header.to = to;
     header.from = cfg_.node_num;
     header.id = packet_id;
-    header.flags = makeFlags(cfg_.hop_limit);
+    header.flags = makeFlags(cfg_.hop_limit, to != kBroadcastNode);
     header.channel = channel_hash_;
 
     return encodeEncryptedDataFrame(header, data, cfg_.psk, cfg_.psk_len, out);
@@ -55,13 +64,67 @@ bool MeshtasticNode::buildTextFrame(const char* text, uint32_t packet_id, Packet
 
 bool MeshtasticNode::buildTextBytes(const char* text, uint32_t packet_id, uint8_t* out, size_t out_len, size_t* written) const
 {
+    return buildTextBytesTo(kBroadcastNode, text, packet_id, out, out_len, written);
+}
+
+bool MeshtasticNode::buildTextBytesTo(uint32_t to, const char* text, uint32_t packet_id, uint8_t* out, size_t out_len, size_t* written) const
+{
     if (!out || !written) return false;
     PacketFrame frame;
-    if (!buildTextFrame(text, packet_id, &frame)) return false;
+    if (!buildTextFrameTo(to, text, packet_id, &frame)) return false;
     return encodeFrame(frame, out, out_len, written);
 }
 
-bool MeshtasticNode::ingestFrame(const PacketFrame& frame, int rssi, float snr)
+bool MeshtasticNode::buildDataFrame(PortNum portnum,
+                                    const uint8_t* payload,
+                                    size_t payload_len,
+                                    uint32_t to,
+                                    uint32_t packet_id,
+                                    bool want_response,
+                                    bool want_ack,
+                                    PacketFrame* out) const
+{
+    if (!configured_ || !out || packet_id == 0 || payload_len > kDataPayloadLen) return false;
+    if (!payload && payload_len > 0) return false;
+
+    DataPacket data;
+    data.portnum = portnum;
+    data.source = cfg_.node_num;
+    data.dest = to;
+    data.want_response = want_response;
+    data.payload_len = payload_len;
+    if (payload_len > 0) memcpy(data.payload, payload, payload_len);
+
+    PacketHeader header;
+    header.to = to;
+    header.from = cfg_.node_num;
+    header.id = packet_id;
+    header.flags = makeFlags(cfg_.hop_limit, want_ack);
+    header.channel = channel_hash_;
+
+    return encodeEncryptedDataFrame(header, data, cfg_.psk, cfg_.psk_len, out);
+}
+
+bool MeshtasticNode::buildDataBytes(PortNum portnum,
+                                    const uint8_t* payload,
+                                    size_t payload_len,
+                                    uint32_t to,
+                                    uint32_t packet_id,
+                                    bool want_response,
+                                    bool want_ack,
+                                    uint8_t* out,
+                                    size_t out_len,
+                                    size_t* written) const
+{
+    if (!out || !written) return false;
+    PacketFrame frame;
+    if (!buildDataFrame(portnum, payload, payload_len, to, packet_id, want_response, want_ack, &frame)) {
+        return false;
+    }
+    return encodeFrame(frame, out, out_len, written);
+}
+
+bool MeshtasticNode::ingestFrame(const PacketFrame& frame, int rssi, float snr, uint32_t now)
 {
     if (!configured_) return false;
     if (frame.payload_len > kMaxEncryptedPayloadBytes) return false;
@@ -72,16 +135,16 @@ bool MeshtasticNode::ingestFrame(const PacketFrame& frame, int rssi, float snr)
 
     DataPacket data;
     if (!decodeEncryptedDataFrame(frame, cfg_.psk, cfg_.psk_len, &data)) return false;
-    if (!queueMessage(frame, data, rssi, snr)) return false;
+    if (!handleDecodedData(frame, data, rssi, snr, now)) return false;
     rememberSeen(frame.header.from, frame.header.id);
     return true;
 }
 
-bool MeshtasticNode::ingestBytes(const uint8_t* bytes, size_t len, int rssi, float snr)
+bool MeshtasticNode::ingestBytes(const uint8_t* bytes, size_t len, int rssi, float snr, uint32_t now)
 {
     PacketFrame frame;
     if (!decodeFrame(bytes, len, &frame)) return false;
-    return ingestFrame(frame, rssi, snr);
+    return ingestFrame(frame, rssi, snr, now);
 }
 
 int MeshtasticNode::pollMessages(Message* out, int max)
@@ -96,6 +159,50 @@ int MeshtasticNode::pollMessages(Message* out, int max)
     return n;
 }
 
+int MeshtasticNode::exportContacts(Contact* out, int max) const
+{
+    if (!out || max <= 0) return 0;
+    int n = contact_count_ < max ? contact_count_ : max;
+    for (int i = 0; i < n; ++i) out[i] = contacts_[i];
+    return n;
+}
+
+bool MeshtasticNode::nodeNumForContact(const char* name, uint32_t* out) const
+{
+    if (!name || !out) return false;
+    for (int i = 0; i < contact_count_; ++i) {
+        const Contact& c = contacts_[i];
+        if ((c.name[0] && strcmp(c.name, name) == 0) ||
+            (c.long_name[0] && strcmp(c.long_name, name) == 0) ||
+            (c.short_name[0] && strcmp(c.short_name, name) == 0)) {
+            *out = c.node_num;
+            return true;
+        }
+    }
+    if (name[0] == '!') {
+        char* end = nullptr;
+        uint32_t parsed = static_cast<uint32_t>(strtoul(name + 1, &end, 16));
+        if (end && *end == '\0' && parsed != 0 && parsed != kBroadcastNode) {
+            *out = parsed;
+            return true;
+        }
+    }
+    return false;
+}
+
+const char* MeshtasticNode::nameForNode(uint32_t node_num, char* fallback, size_t fallback_len) const
+{
+    for (int i = 0; i < contact_count_; ++i) {
+        if (contacts_[i].node_num == node_num && contacts_[i].name[0]) {
+            return contacts_[i].name;
+        }
+    }
+    if (!fallback || fallback_len == 0) return "";
+    snprintf(fallback, fallback_len, "!%08lX", static_cast<unsigned long>(node_num));
+    fallback[fallback_len - 1] = '\0';
+    return fallback;
+}
+
 void MeshtasticNode::clear()
 {
     for (auto& seen : seen_) {
@@ -108,6 +215,10 @@ void MeshtasticNode::clear()
     queue_head_ = 0;
     queue_tail_ = 0;
     queue_count_ = 0;
+    for (auto& contact : contacts_) {
+        contact = Contact{};
+    }
+    contact_count_ = 0;
 }
 
 bool MeshtasticNode::resolveChannelHash(uint8_t* out_hash) const
@@ -160,6 +271,88 @@ bool MeshtasticNode::queueMessage(const PacketFrame& frame, const DataPacket& da
     queue_head_ = (queue_head_ + 1) % static_cast<int>(kMaxQueuedMessages);
     queue_count_++;
     return true;
+}
+
+bool MeshtasticNode::handleDecodedData(const PacketFrame& frame, const DataPacket& data, int rssi, float snr, uint32_t now)
+{
+    updateContact(frame.header.from, nullptr, nullptr, rssi, snr, now);
+
+    if (data.portnum == PortNum::TextMessage || data.portnum == PortNum::TextMessageCompressed) {
+        return queueMessage(frame, data, rssi, snr);
+    }
+
+    if (data.portnum == PortNum::NodeInfo) {
+        meshtastic_User user = meshtastic_User_init_zero;
+        if (!decodeProtoMessage(&meshtastic_User_msg, data.payload, data.payload_len, &user)) return false;
+        updateContact(frame.header.from, user.long_name, user.short_name, rssi, snr, now);
+        return true;
+    }
+
+    if (data.portnum == PortNum::Position) {
+        meshtastic_Position pos = meshtastic_Position_init_zero;
+        if (!decodeProtoMessage(&meshtastic_Position_msg, data.payload, data.payload_len, &pos)) return false;
+        return true;
+    }
+
+    if (data.portnum == PortNum::Routing || data.portnum == PortNum::TraceRoute ||
+        data.portnum == PortNum::Telemetry || data.portnum == PortNum::NeighborInfo) {
+        return true;
+    }
+
+    return false;
+}
+
+void MeshtasticNode::updateContact(uint32_t node_num,
+                                   const char* long_name,
+                                   const char* short_name,
+                                   int rssi,
+                                   float snr,
+                                   uint32_t now)
+{
+    if (node_num == 0 || node_num == cfg_.node_num || node_num == kBroadcastNode) return;
+
+    int idx = findContactByNode(node_num);
+    if (idx < 0) {
+        if (contact_count_ < static_cast<int>(sizeof(contacts_) / sizeof(contacts_[0]))) {
+            idx = contact_count_++;
+        } else {
+            idx = 0;
+            for (int i = 1; i < contact_count_; ++i) {
+                if (contacts_[i].last_seen < contacts_[idx].last_seen) idx = i;
+            }
+        }
+        contacts_[idx] = Contact{};
+        contacts_[idx].node_num = node_num;
+        snprintf(contacts_[idx].name, sizeof(contacts_[idx].name), "!%08lX", static_cast<unsigned long>(node_num));
+    }
+
+    Contact& contact = contacts_[idx];
+    contact.rssi = rssi;
+    contact.snr = snr;
+    if (now != 0) contact.last_seen = now;
+
+    if (long_name && long_name[0]) {
+        strncpy(contact.long_name, long_name, sizeof(contact.long_name) - 1);
+        contact.long_name[sizeof(contact.long_name) - 1] = '\0';
+    }
+    if (short_name && short_name[0]) {
+        strncpy(contact.short_name, short_name, sizeof(contact.short_name) - 1);
+        contact.short_name[sizeof(contact.short_name) - 1] = '\0';
+    }
+    if (contact.long_name[0]) {
+        strncpy(contact.name, contact.long_name, sizeof(contact.name) - 1);
+    } else if (contact.short_name[0]) {
+        strncpy(contact.name, contact.short_name, sizeof(contact.name) - 1);
+    }
+    contact.name[sizeof(contact.name) - 1] = '\0';
+}
+
+int MeshtasticNode::findContactByNode(uint32_t node_num) const
+{
+    for (int i = 0; i < contact_count_; ++i) {
+        if (contacts_[i].node_num == node_num) return i;
+    }
+    return -1;
 }
 
 } // namespace meshtastic

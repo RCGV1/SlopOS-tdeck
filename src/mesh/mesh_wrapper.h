@@ -6,6 +6,7 @@
 
 #pragma once
 #include <cstdint>
+#include "hal/prefs.h"
 
 namespace slopos {
 namespace mesh {
@@ -34,6 +35,15 @@ struct PacketLogEntry {
 
 bool init(bool spiffs_ok = true);
 void loop();
+
+slopos::ProtocolMode getProtocolMode();
+const char* getProtocolModeName();
+bool setProtocolMode(slopos::ProtocolMode mode);
+bool protocolSupportsDirectMessages();
+bool protocolSupportsContacts();
+bool protocolSupportsChannels();
+bool protocolSupportsAdvert();
+bool protocolSupportsTrace();
 
 bool sendMessage(const char* dest_name, const char* text);
 bool sendChannelMessage(const char* channel_name, const char* text);

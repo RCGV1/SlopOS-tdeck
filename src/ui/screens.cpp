@@ -30,6 +30,7 @@
 #include "../hal/prefs.h"
 #include "../hal/keyboard.h"
 #include "../mesh/mesh_wrapper.h"
+#include "../meshtastic/meshtastic_support.h"
 #include "../app/map_renderer.h"
 #include "../fonts/emoji_font.h"
 #include <Arduino.h>
@@ -47,6 +48,7 @@ using namespace responsive;
 
 static lv_obj_t* g_date_row = nullptr;   // for live update after setting time
 static lv_obj_t* g_time_row = nullptr;
+static lv_obj_t* g_protocol_row = nullptr;
 static lv_obj_t* g_advert_status_label = nullptr;
 static lv_obj_t* g_advert_button = nullptr;
 static lv_timer_t* g_advert_status_timer = nullptr;
@@ -707,8 +709,32 @@ void signal_screen_show()
     lv_obj_align(lbl, LV_ALIGN_TOP_LEFT, 0, CONTENT_Y + 4);
 
     char buf[512];
-    if (p.configured) {
+    if (p.protocol_mode == slopos::ProtocolMode::Meshtastic) {
+        auto region = static_cast<slopos::meshtastic::RegionCode>(p.meshtastic_region);
+        auto preset = static_cast<slopos::meshtastic::ModemPreset>(p.meshtastic_preset);
+        const auto* region_info = slopos::meshtastic::getRegion(region);
+        slopos::meshtastic::FrequencyPlan plan;
+        bool has_plan = slopos::meshtastic::computeFrequencyPlan(
+            region, preset, p.meshtastic_channel, 0, 0.0f, 0.0f, &plan);
         snprintf(buf, sizeof(buf),
+            "Protocol: Meshtastic\n"
+            "RSSI:    %d dBm\n"
+            "SNR:     %.1f dB\n"
+            "Noise:   %d dBm\n\n"
+            "Region:  %s\n"
+            "Preset:  %s\n"
+            "Channel: %s\n"
+            "Freq:    %.3f MHz\n"
+            "TX Pwr:  %d dBm",
+            rssi, snr, noise,
+            region_info ? region_info->name : "US",
+            slopos::meshtastic::presetName(preset),
+            p.meshtastic_channel[0] ? p.meshtastic_channel : "LongFast",
+            has_plan ? plan.frequency_mhz : 0.0f,
+            has_plan ? plan.tx_power_dbm : 0);
+    } else if (p.configured) {
+        snprintf(buf, sizeof(buf),
+            "Protocol: MeshCore\n"
             "RSSI:    %d dBm\n"
             "SNR:     %.1f dB\n"
             "Noise:   %d dBm\n\n"
@@ -721,6 +747,7 @@ void signal_screen_show()
             p.freq, p.bw, p.sf, p.cr, p.tx_power_dbm);
     } else {
         snprintf(buf, sizeof(buf),
+            "Protocol: MeshCore\n"
             "RSSI:    %d dBm\n"
             "SNR:     %.1f dB\n"
             "Noise:   %d dBm\n\n"
@@ -1153,6 +1180,52 @@ static void backlight_dialog(lv_obj_t* parent, lv_obj_t* row_label)
     }, LV_EVENT_CLICKED, (void*)ctx);
 }
 
+static void protocol_mode_dialog(lv_obj_t* parent, lv_obj_t* row_label)
+{
+    g_protocol_row = row_label;
+
+    auto dlg_sz = dialog_size(230, 112);
+    lv_obj_t* dlg = lv_obj_create(parent);
+    lv_obj_set_size(dlg, dlg_sz.w, dlg_sz.h);
+    lv_obj_center(dlg);
+    lv_obj_set_style_bg_color(dlg, lv_color_hex(BG_SECONDARY), 0);
+    lv_obj_set_style_radius(dlg, 0, 0);
+    lv_obj_set_style_border_width(dlg, 0, 0);
+    lv_obj_set_style_pad_all(dlg, 8, 0);
+
+    lv_obj_t* title = lv_label_create(dlg);
+    lv_label_set_text(title, "Protocol Mode");
+    lv_obj_set_style_text_color(title, lv_color_hex(TEXT_PRIMARY), 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_12, 0);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 4);
+
+    auto make_btn = [&](const char* text, int x, slopos::ProtocolMode mode) {
+        lv_obj_t* btn = lv_btn_create(dlg);
+        lv_obj_set_size(btn, 96, 34);
+        lv_obj_align(btn, LV_ALIGN_CENTER, x, 6);
+        lv_obj_set_style_bg_color(btn, lv_color_hex(
+            slopos::prefs_get().protocol_mode == mode ? ACCENT_GREEN : ACCENT), 0);
+        lv_obj_set_style_radius(btn, 0, 0);
+        lv_obj_t* lbl = lv_label_create(btn);
+        lv_label_set_text(lbl, text);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_10, 0);
+        lv_obj_center(lbl);
+        lv_obj_add_event_cb(btn, [](lv_event_t* e) {
+            auto mode = static_cast<slopos::ProtocolMode>((intptr_t)lv_event_get_user_data(e));
+            slopos::mesh::setProtocolMode(mode);
+            char row_buf[64];
+            snprintf(row_buf, sizeof(row_buf), "  Protocol: %s", slopos::protocolModeName(mode));
+            update_row_label(g_protocol_row, row_buf);
+            chat_save_messages();
+            delay(100);
+            ESP.restart();
+        }, LV_EVENT_CLICKED, (void*)(intptr_t)static_cast<uint8_t>(mode));
+    };
+
+    make_btn("MeshCore", -54, slopos::ProtocolMode::MeshCore);
+    make_btn("Meshtastic", 54, slopos::ProtocolMode::Meshtastic);
+}
+
 // ════════════════════════════════════════════════════════
 // Settings — status rows with alternating backgrounds
 // ════════════════════════════════════════════════════════
@@ -1184,15 +1257,32 @@ void settings_screen_show()
     snprintf(buf, sizeof(buf), "  Name: %s", p.node_name);
     add_row(LV_SYMBOL_SETTINGS, buf);
 
+    // Protocol mode (tappable - saves and reboots into the selected stack)
+    snprintf(buf, sizeof(buf), "  Protocol: %s", slopos::protocolModeName(p.protocol_mode));
+    lv_obj_t* btn_proto = add_row(LV_SYMBOL_SETTINGS, buf);
+    g_protocol_row = btn_proto;
+    lv_obj_add_event_cb(btn_proto, [](lv_event_t* e) {
+        protocol_mode_dialog(lv_obj_get_screen((lv_obj_t*)lv_event_get_target(e)),
+                             (lv_obj_t*)lv_event_get_target(e));
+    }, LV_EVENT_CLICKED, nullptr);
+
     // Radio config (tappable — opens radio setup)
-    if (p.configured) {
+    if (p.protocol_mode == slopos::ProtocolMode::Meshtastic) {
+        auto region = static_cast<slopos::meshtastic::RegionCode>(p.meshtastic_region);
+        auto preset = static_cast<slopos::meshtastic::ModemPreset>(p.meshtastic_preset);
+        const auto* region_info = slopos::meshtastic::getRegion(region);
+        snprintf(buf, sizeof(buf), "  Meshtastic: %s / %s / %s",
+                 region_info ? region_info->name : "US",
+                 slopos::meshtastic::presetName(preset),
+                 p.meshtastic_channel[0] ? p.meshtastic_channel : "LongFast");
+    } else if (p.configured) {
         snprintf(buf, sizeof(buf), "  Radio: %.3f MHz / %.1f kHz / SF%d / %d dBm",
                  p.freq, p.bw, p.sf, p.tx_power_dbm);
     } else {
         snprintf(buf, sizeof(buf), "  Radio: NOT CONFIGURED — tap to configure");
     }
     lv_obj_t* btn_rf = add_row(LV_SYMBOL_WIFI, buf);
-    if (!p.configured) {
+    if (p.protocol_mode == slopos::ProtocolMode::MeshCore && !p.configured) {
         lv_obj_set_style_bg_color(btn_rf, lv_color_hex(0x4a2020), 0);
         lv_obj_set_style_bg_color(btn_rf, lv_color_hex(0x4a2020), LV_STATE_DEFAULT);
     }
@@ -1261,6 +1351,7 @@ void settings_screen_show()
     lv_obj_add_event_cb(scr, [](lv_event_t*) {
         g_date_row = nullptr;
         g_time_row = nullptr;
+        g_protocol_row = nullptr;
         g_backlight_row = nullptr;
         g_chat_history_row = nullptr;
     }, LV_EVENT_DELETE, nullptr);
@@ -1334,8 +1425,17 @@ void terminal_screen_show()
     // Boot header lines
     const slopos::NodePrefs& p = slopos::prefs_get();
     term_add_line(log, "SlopOS T-Deck Terminal");
-    term_add_line(log, "MeshCore protocol active");
-    if (p.configured) {
+    char proto_buf[48];
+    snprintf(proto_buf, sizeof(proto_buf), "%s protocol active", slopos::mesh::getProtocolModeName());
+    term_add_line(log, proto_buf);
+    if (p.protocol_mode == slopos::ProtocolMode::Meshtastic) {
+        char mesh_buf[96];
+        snprintf(mesh_buf, sizeof(mesh_buf), "Meshtastic: %s / %s",
+                 p.meshtastic_channel[0] ? p.meshtastic_channel : "LongFast",
+                 slopos::meshtastic::presetName(
+                     static_cast<slopos::meshtastic::ModemPreset>(p.meshtastic_preset)));
+        term_add_line(log, mesh_buf);
+    } else if (p.configured) {
         char radio_buf[64];
         snprintf(radio_buf, sizeof(radio_buf), "Radio: SX1262 %.3f MHz configured", p.freq);
         term_add_line(log, radio_buf);
@@ -1389,7 +1489,8 @@ void terminal_screen_show()
             float snr = slopos::mesh::getLastSNR();
             int noise = slopos::mesh::getNoiseFloor();
             snprintf(result, sizeof(result),
-                "RSSI:%ddBm SNR:%.1fdB Noise:%ddBm  Contacts:%d Channels:%d",
+                "%s RSSI:%ddBm SNR:%.1fdB Noise:%ddBm  Contacts:%d Channels:%d",
+                slopos::mesh::getProtocolModeName(),
                 rssi, snr, noise,
                 slopos::mesh::getContactCount(),
                 slopos::mesh::getChannelCount());

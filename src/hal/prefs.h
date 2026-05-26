@@ -12,6 +12,14 @@
 
 namespace slopos {
 
+enum class ProtocolMode : uint8_t {
+    MeshCore = 0,
+    Meshtastic = 1,
+};
+
+const char* protocolModeName(ProtocolMode mode);
+ProtocolMode protocolModeFromByte(uint8_t value);
+
 struct NodePrefs {
     char    node_name[32];
     float   freq;           // MHz (e.g. 869.618)
@@ -22,6 +30,13 @@ struct NodePrefs {
     bool    configured;     // false until user explicitly saves settings
     uint8_t kbd_backlight;  // 0-255, keyboard backlight brightness
     uint16_t chat_msg_cap;  // Per-channel in-memory message history cap
+    ProtocolMode protocol_mode;
+    uint8_t meshtastic_region;     // slopos::meshtastic::RegionCode
+    uint8_t meshtastic_preset;     // slopos::meshtastic::ModemPreset
+    uint8_t meshtastic_hop_limit;
+    char    meshtastic_channel[32];
+    uint8_t meshtastic_psk[32];
+    uint8_t meshtastic_psk_len;
 
     // Sentinel defaults — radio will NOT transmit until user configures
     void set_defaults() {
@@ -35,6 +50,15 @@ struct NodePrefs {
         configured = false;
         kbd_backlight = 127;
         chat_msg_cap = 200;
+        protocol_mode = ProtocolMode::MeshCore;
+        meshtastic_region = 1; // RegionCode::US
+        meshtastic_preset = 1; // ModemPreset::LongFast
+        meshtastic_hop_limit = 3;
+        strncpy(meshtastic_channel, "LongFast", sizeof(meshtastic_channel) - 1);
+        meshtastic_channel[sizeof(meshtastic_channel) - 1] = '\0';
+        memset(meshtastic_psk, 0, sizeof(meshtastic_psk));
+        meshtastic_psk[0] = 1; // Meshtastic default PSK index
+        meshtastic_psk_len = 1;
     }
 };
 

@@ -55,6 +55,17 @@ TEST_F(MeshWrapperTest, LoopFunctionExists) {
     SUCCEED();
 }
 
+TEST_F(MeshWrapperTest, ProtocolModeApiExists) {
+    using get_fn = slopos::ProtocolMode (*)();
+    using name_fn = const char* (*)();
+    using set_fn = bool (*)(slopos::ProtocolMode);
+    (void)static_cast<get_fn>(slopos::mesh::getProtocolMode);
+    (void)static_cast<name_fn>(slopos::mesh::getProtocolModeName);
+    (void)static_cast<set_fn>(slopos::mesh::setProtocolMode);
+    EXPECT_STREQ(slopos::protocolModeName(slopos::ProtocolMode::MeshCore), "MeshCore");
+    EXPECT_STREQ(slopos::protocolModeName(slopos::ProtocolMode::Meshtastic), "Meshtastic");
+}
+
 TEST_F(MeshWrapperTest, SendDirectSignature) {
     using send_fn = bool (*)(const char*, const char*);
     (void)static_cast<send_fn>(slopos::mesh::sendMessage);

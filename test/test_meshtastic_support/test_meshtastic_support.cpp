@@ -476,6 +476,55 @@ TEST(MeshtasticSupportTest, NodeEncodesAndIngestsBytes) {
     EXPECT_FLOAT_EQ(msg.snr, 9.5f);
 }
 
+TEST(MeshtasticSupportTest, NodeTracksNodeInfoContactsAndUnicastText) {
+    MeshtasticNode sender;
+    MeshtasticNode::Config sender_cfg;
+    sender_cfg.node_num = 0x11111111u;
+    ASSERT_TRUE(sender.begin(sender_cfg));
+
+    MeshtasticNode receiver;
+    MeshtasticNode::Config receiver_cfg;
+    receiver_cfg.node_num = 0x22222222u;
+    ASSERT_TRUE(receiver.begin(receiver_cfg));
+
+    meshtastic_User user = meshtastic_User_init_zero;
+    strncpy(user.id, "!11111111", sizeof(user.id) - 1);
+    strncpy(user.long_name, "Alice Node", sizeof(user.long_name) - 1);
+    strncpy(user.short_name, "AL", sizeof(user.short_name) - 1);
+    user.hw_model = meshtastic_HardwareModel_T_DECK;
+    user.role = meshtastic_Config_DeviceConfig_Role_CLIENT;
+
+    uint8_t payload[kDataPayloadLen] = {};
+    size_t payload_len = 0;
+    ASSERT_TRUE(encodeProtoMessage(&meshtastic_User_msg, &user, payload, sizeof(payload), &payload_len));
+
+    uint8_t bytes[kMaxLoRaFrameBytes] = {};
+    size_t written = 0;
+    ASSERT_TRUE(sender.buildDataBytes(PortNum::NodeInfo, payload, payload_len, kBroadcastNode,
+                                      0x50u, true, false, bytes, sizeof(bytes), &written));
+    ASSERT_TRUE(receiver.ingestBytes(bytes, written, -68, 7.25f, 1234));
+
+    MeshtasticNode::Contact contacts[2];
+    ASSERT_EQ(receiver.exportContacts(contacts, 2), 1);
+    EXPECT_EQ(contacts[0].node_num, sender_cfg.node_num);
+    EXPECT_STREQ(contacts[0].name, "Alice Node");
+    EXPECT_EQ(contacts[0].rssi, -68);
+    EXPECT_EQ(contacts[0].last_seen, 1234u);
+
+    uint32_t node = 0;
+    ASSERT_TRUE(receiver.nodeNumForContact("Alice Node", &node));
+    EXPECT_EQ(node, sender_cfg.node_num);
+
+    ASSERT_TRUE(sender.buildTextBytesTo(receiver_cfg.node_num, "direct hello", 0x51u,
+                                        bytes, sizeof(bytes), &written));
+    ASSERT_TRUE(receiver.ingestBytes(bytes, written, -65, 6.0f, 1235));
+
+    MeshtasticNode::Message msg;
+    ASSERT_EQ(receiver.pollMessages(&msg, 1), 1);
+    EXPECT_EQ(msg.to, receiver_cfg.node_num);
+    EXPECT_STREQ(msg.text, "direct hello");
+}
+
 TEST(MeshtasticSupportTest, NodeRejectsDuplicateOrWrongChannelFrames) {
     MeshtasticNode sender;
     MeshtasticNode::Config sender_cfg;
