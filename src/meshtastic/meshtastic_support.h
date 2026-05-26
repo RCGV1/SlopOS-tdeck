@@ -8,13 +8,20 @@
 #include <cstddef>
 #include <cstdint>
 
+#include <pb.h>
+#include "meshtastic/config.pb.h"
+#include "meshtastic/mesh.pb.h"
+#include "meshtastic/portnums.pb.h"
+
 namespace slopos {
 namespace meshtastic {
 
 static constexpr size_t kHeaderLength = 16;
 static constexpr size_t kMaxLoRaFrameBytes = 255;
 static constexpr size_t kMaxEncryptedPayloadBytes = kMaxLoRaFrameBytes - kHeaderLength;
-static constexpr size_t kDataPayloadLen = 233;
+static constexpr size_t kDataPayloadLen = meshtastic_Constants_DATA_PAYLOAD_LEN;
+static constexpr size_t kDataProtoMaxBytes = meshtastic_Data_size;
+static constexpr size_t kMeshPacketProtoMaxBytes = meshtastic_MeshPacket_size;
 static constexpr uint32_t kBroadcastNode = 0xFFFFFFFFu;
 static constexpr uint8_t kNoNextHop = 0;
 static constexpr uint8_t kNoRelayNode = 0;
@@ -26,97 +33,97 @@ static constexpr uint8_t kPacketFlagsHopStartMask = 0xE0;
 static constexpr uint8_t kPacketFlagsHopStartShift = 5;
 
 enum class PortNum : uint16_t {
-    Unknown = 0,
-    TextMessage = 1,
-    RemoteHardware = 2,
-    Position = 3,
-    NodeInfo = 4,
-    Routing = 5,
-    Admin = 6,
-    TextMessageCompressed = 7,
-    Waypoint = 8,
-    Audio = 9,
-    DetectionSensor = 10,
-    Alert = 11,
-    KeyVerification = 12,
-    RemoteShell = 13,
-    Reply = 32,
-    IpTunnel = 33,
-    PaxCounter = 34,
-    StoreForwardPlusPlus = 35,
-    NodeStatus = 36,
-    Serial = 64,
-    StoreForward = 65,
-    RangeTest = 66,
-    Telemetry = 67,
-    Zps = 68,
-    Simulator = 69,
-    TraceRoute = 70,
-    NeighborInfo = 71,
-    AtakPlugin = 72,
-    MapReport = 73,
-    PowerStress = 74,
-    LoRaWanBridge = 75,
-    ReticulumTunnel = 76,
-    Cayenne = 77,
-    AtakPluginV2 = 78,
-    GroupAlarm = 112,
-    PrivateApp = 256,
-    AtakForwarder = 257,
-    Max = 511,
+    Unknown = meshtastic_PortNum_UNKNOWN_APP,
+    TextMessage = meshtastic_PortNum_TEXT_MESSAGE_APP,
+    RemoteHardware = meshtastic_PortNum_REMOTE_HARDWARE_APP,
+    Position = meshtastic_PortNum_POSITION_APP,
+    NodeInfo = meshtastic_PortNum_NODEINFO_APP,
+    Routing = meshtastic_PortNum_ROUTING_APP,
+    Admin = meshtastic_PortNum_ADMIN_APP,
+    TextMessageCompressed = meshtastic_PortNum_TEXT_MESSAGE_COMPRESSED_APP,
+    Waypoint = meshtastic_PortNum_WAYPOINT_APP,
+    Audio = meshtastic_PortNum_AUDIO_APP,
+    DetectionSensor = meshtastic_PortNum_DETECTION_SENSOR_APP,
+    Alert = meshtastic_PortNum_ALERT_APP,
+    KeyVerification = meshtastic_PortNum_KEY_VERIFICATION_APP,
+    RemoteShell = meshtastic_PortNum_REMOTE_SHELL_APP,
+    Reply = meshtastic_PortNum_REPLY_APP,
+    IpTunnel = meshtastic_PortNum_IP_TUNNEL_APP,
+    PaxCounter = meshtastic_PortNum_PAXCOUNTER_APP,
+    StoreForwardPlusPlus = meshtastic_PortNum_STORE_FORWARD_PLUSPLUS_APP,
+    NodeStatus = meshtastic_PortNum_NODE_STATUS_APP,
+    Serial = meshtastic_PortNum_SERIAL_APP,
+    StoreForward = meshtastic_PortNum_STORE_FORWARD_APP,
+    RangeTest = meshtastic_PortNum_RANGE_TEST_APP,
+    Telemetry = meshtastic_PortNum_TELEMETRY_APP,
+    Zps = meshtastic_PortNum_ZPS_APP,
+    Simulator = meshtastic_PortNum_SIMULATOR_APP,
+    TraceRoute = meshtastic_PortNum_TRACEROUTE_APP,
+    NeighborInfo = meshtastic_PortNum_NEIGHBORINFO_APP,
+    AtakPlugin = meshtastic_PortNum_ATAK_PLUGIN,
+    MapReport = meshtastic_PortNum_MAP_REPORT_APP,
+    PowerStress = meshtastic_PortNum_POWERSTRESS_APP,
+    LoRaWanBridge = meshtastic_PortNum_LORAWAN_BRIDGE,
+    ReticulumTunnel = meshtastic_PortNum_RETICULUM_TUNNEL_APP,
+    Cayenne = meshtastic_PortNum_CAYENNE_APP,
+    AtakPluginV2 = meshtastic_PortNum_ATAK_PLUGIN_V2,
+    GroupAlarm = meshtastic_PortNum_GROUPALARM_APP,
+    PrivateApp = meshtastic_PortNum_PRIVATE_APP,
+    AtakForwarder = meshtastic_PortNum_ATAK_FORWARDER,
+    Max = meshtastic_PortNum_MAX,
 };
 
 enum class ModemPreset : uint8_t {
-    LongFast = 0,
-    LongSlow = 1,
-    VeryLongSlow = 2,
-    MediumSlow = 3,
-    MediumFast = 4,
-    ShortSlow = 5,
-    ShortFast = 6,
-    LongModerate = 7,
-    ShortTurbo = 8,
-    LongTurbo = 9,
-    LiteFast = 10,
-    LiteSlow = 11,
-    NarrowFast = 12,
-    NarrowSlow = 13,
+    LongFast = meshtastic_Config_LoRaConfig_ModemPreset_LONG_FAST,
+    LongSlow = meshtastic_Config_LoRaConfig_ModemPreset_LONG_SLOW,
+    VeryLongSlow = meshtastic_Config_LoRaConfig_ModemPreset_VERY_LONG_SLOW,
+    MediumSlow = meshtastic_Config_LoRaConfig_ModemPreset_MEDIUM_SLOW,
+    MediumFast = meshtastic_Config_LoRaConfig_ModemPreset_MEDIUM_FAST,
+    ShortSlow = meshtastic_Config_LoRaConfig_ModemPreset_SHORT_SLOW,
+    ShortFast = meshtastic_Config_LoRaConfig_ModemPreset_SHORT_FAST,
+    LongModerate = meshtastic_Config_LoRaConfig_ModemPreset_LONG_MODERATE,
+    ShortTurbo = meshtastic_Config_LoRaConfig_ModemPreset_SHORT_TURBO,
+    LongTurbo = meshtastic_Config_LoRaConfig_ModemPreset_LONG_TURBO,
+    LiteFast = meshtastic_Config_LoRaConfig_ModemPreset_LITE_FAST,
+    LiteSlow = meshtastic_Config_LoRaConfig_ModemPreset_LITE_SLOW,
+    NarrowFast = meshtastic_Config_LoRaConfig_ModemPreset_NARROW_FAST,
+    NarrowSlow = meshtastic_Config_LoRaConfig_ModemPreset_NARROW_SLOW,
 };
 
 enum class RegionCode : uint8_t {
-    Unset = 0,
-    US = 1,
-    EU433 = 2,
-    EU868 = 3,
-    CN = 4,
-    JP = 5,
-    ANZ = 6,
-    KR = 7,
-    TW = 8,
-    RU = 9,
-    IN = 10,
-    NZ865 = 11,
-    TH = 12,
-    Lora24 = 13,
-    UA433 = 14,
-    UA868 = 15,
-    MY433 = 16,
-    MY919 = 17,
-    SG923 = 18,
-    PH433 = 19,
-    PH868 = 20,
-    PH915 = 21,
-    ANZ433 = 22,
-    KZ433 = 23,
-    KZ863 = 24,
-    NP865 = 25,
-    BR902 = 26,
-    ITU1_2M = 27,
-    ITU23_2M = 28,
-    EU866 = 29,
-    EU874 = 30,
-    EU917 = 31,
-    EUN868 = 32,
+    Unset = meshtastic_Config_LoRaConfig_RegionCode_UNSET,
+    US = meshtastic_Config_LoRaConfig_RegionCode_US,
+    EU433 = meshtastic_Config_LoRaConfig_RegionCode_EU_433,
+    EU868 = meshtastic_Config_LoRaConfig_RegionCode_EU_868,
+    CN = meshtastic_Config_LoRaConfig_RegionCode_CN,
+    JP = meshtastic_Config_LoRaConfig_RegionCode_JP,
+    ANZ = meshtastic_Config_LoRaConfig_RegionCode_ANZ,
+    KR = meshtastic_Config_LoRaConfig_RegionCode_KR,
+    TW = meshtastic_Config_LoRaConfig_RegionCode_TW,
+    RU = meshtastic_Config_LoRaConfig_RegionCode_RU,
+    IN = meshtastic_Config_LoRaConfig_RegionCode_IN,
+    NZ865 = meshtastic_Config_LoRaConfig_RegionCode_NZ_865,
+    TH = meshtastic_Config_LoRaConfig_RegionCode_TH,
+    Lora24 = meshtastic_Config_LoRaConfig_RegionCode_LORA_24,
+    UA433 = meshtastic_Config_LoRaConfig_RegionCode_UA_433,
+    UA868 = meshtastic_Config_LoRaConfig_RegionCode_UA_868,
+    MY433 = meshtastic_Config_LoRaConfig_RegionCode_MY_433,
+    MY919 = meshtastic_Config_LoRaConfig_RegionCode_MY_919,
+    SG923 = meshtastic_Config_LoRaConfig_RegionCode_SG_923,
+    PH433 = meshtastic_Config_LoRaConfig_RegionCode_PH_433,
+    PH868 = meshtastic_Config_LoRaConfig_RegionCode_PH_868,
+    PH915 = meshtastic_Config_LoRaConfig_RegionCode_PH_915,
+    ANZ433 = meshtastic_Config_LoRaConfig_RegionCode_ANZ_433,
+    KZ433 = meshtastic_Config_LoRaConfig_RegionCode_KZ_433,
+    KZ863 = meshtastic_Config_LoRaConfig_RegionCode_KZ_863,
+    NP865 = meshtastic_Config_LoRaConfig_RegionCode_NP_865,
+    BR902 = meshtastic_Config_LoRaConfig_RegionCode_BR_902,
+    ITU1_2M = meshtastic_Config_LoRaConfig_RegionCode_ITU1_2M,
+    ITU23_2M = meshtastic_Config_LoRaConfig_RegionCode_ITU23_2M,
+    EU866 = meshtastic_Config_LoRaConfig_RegionCode_EU_866,
+    EU874 = meshtastic_Config_LoRaConfig_RegionCode_EU_874,
+    EU917 = meshtastic_Config_LoRaConfig_RegionCode_EU_917,
+    EUN868 = meshtastic_Config_LoRaConfig_RegionCode_EU_N_868,
 };
 
 struct PacketHeader {
@@ -192,6 +199,16 @@ bool decodeFrame(const uint8_t* data, size_t len, PacketFrame* out);
 
 bool encodeData(const DataPacket& data, uint8_t* out, size_t out_len, size_t* written);
 bool decodeData(const uint8_t* data, size_t len, DataPacket* out);
+bool toProtoData(const DataPacket& data, meshtastic_Data* out);
+bool fromProtoData(const meshtastic_Data& data, DataPacket* out);
+bool encodeProtoData(const meshtastic_Data& data, uint8_t* out, size_t out_len, size_t* written);
+bool decodeProtoData(const uint8_t* data, size_t len, meshtastic_Data* out);
+bool frameToMeshPacket(const PacketFrame& frame, bool payload_encrypted, meshtastic_MeshPacket* out);
+bool meshPacketToFrame(const meshtastic_MeshPacket& packet, PacketFrame* out);
+bool encodeMeshPacketProto(const meshtastic_MeshPacket& packet, uint8_t* out, size_t out_len, size_t* written);
+bool decodeMeshPacketProto(const uint8_t* data, size_t len, meshtastic_MeshPacket* out);
+bool encodeProtoMessage(const pb_msgdesc_t* fields, const void* src, uint8_t* out, size_t out_len, size_t* written);
+bool decodeProtoMessage(const pb_msgdesc_t* fields, const uint8_t* data, size_t len, void* out);
 bool makeTextData(const char* text, DataPacket* out);
 bool extractText(const DataPacket& data, char* out, size_t out_len);
 

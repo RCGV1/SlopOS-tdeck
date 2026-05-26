@@ -58,7 +58,7 @@ This document catalogs every feature in the firmware — the 12-grid home screen
 |-------|-------------|-------------|
 | **UI** | Discord-inspired dark pixel interface, 12-tile home grid, chat, settings, and diagnostics screens | `src/ui/*` |
 | **Mesh** | Full MeshCore protocol stack — routing, encryption, group channels, direct messages | `src/mesh/*`, `lib/meshcore/` |
-| **Meshtastic** | Tested Meshtastic wire format, Data protobuf subset, channel hash, AES-CTR crypto, and regional frequency planning | `src/meshtastic/*` |
+| **Meshtastic** | Tested Meshtastic wire format, generated upstream protobuf bindings, channel hash, AES-CTR crypto, and regional frequency planning | `src/meshtastic/*` |
 | **HAL** | All T-Deck peripherals — display, touch, keyboard, trackball, GPS, battery, SD, buzzer, LoRa | `src/hal/*` |
 | **Apps** | Offline map renderer with PNG tile decode and LRU PSRAM cache | `src/app/*` |
 | **Boot** | Sequenced startup: board → display → mesh → UI → peripherals | `src/main.cpp` |
@@ -148,13 +148,14 @@ Signal diagnostics screen showing current RSSI, noise floor, SNR, and signal qua
 
 ### Meshtastic Protocol Layer
 - **Packet wire format** — Meshtastic 16-byte header, LoRa frame sizing, hop/ack/MQTT flags
-- **Data protobuf subset** — text payloads plus source, destination, request, reply, emoji, and bitfield metadata
+- **Real protobuf bindings** — official Meshtastic nanopb schema for Data, MeshPacket, Position, telemetry, admin, channel, device, MQTT, and module messages
+- **Data/MeshPacket helpers** — convert LoRa frames to generated `meshtastic_Data` / `meshtastic_MeshPacket`, with generic nanopb encode/decode helpers for other generated message types
 - **Channel compatibility** — default PSK alias expansion and channel hash generation
 - **AES-CTR payload crypto** — Meshtastic nonce layout with packet ID and sender node number
 - **Regional radio plans** — modem preset parameters, frequency slot calculation, regional power limits
 - **Text node helper** — build encrypted text frames, ingest encrypted frames/bytes, queue decoded messages, reject duplicate/wrong-channel/self frames
 **Full documentation:** [`docs/MESHTASTIC_SUPPORT.md`](MESHTASTIC_SUPPORT.md)
-**Sources:** [`src/meshtastic/meshtastic_support.cpp`](../src/meshtastic/meshtastic_support.cpp), [`src/meshtastic/meshtastic_support.h`](../src/meshtastic/meshtastic_support.h), [`src/meshtastic/meshtastic_node.cpp`](../src/meshtastic/meshtastic_node.cpp), [`src/meshtastic/meshtastic_node.h`](../src/meshtastic/meshtastic_node.h), [`test/test_meshtastic_support/`](../test/test_meshtastic_support/)
+**Sources:** [`src/meshtastic/generated/`](../src/meshtastic/generated/), [`src/meshtastic/meshtastic_support.cpp`](../src/meshtastic/meshtastic_support.cpp), [`src/meshtastic/meshtastic_support.h`](../src/meshtastic/meshtastic_support.h), [`src/meshtastic/meshtastic_node.cpp`](../src/meshtastic/meshtastic_node.cpp), [`src/meshtastic/meshtastic_node.h`](../src/meshtastic/meshtastic_node.h), [`test/test_meshtastic_support/`](../test/test_meshtastic_support/)
 
 ### Screen Navigation
 - **Screen enum** with 14 screen IDs (Home, Chat, Contacts, Channels, Network, Heard, Map, Advertise, Settings, Trace, Terminal, Signal, RadioSetup, Onboarding)
@@ -342,7 +343,7 @@ A dedicated app-level feature bridging the display, SD card, and GPS systems.
 
 ## Test Suite
 
-While not a user-facing feature, the comprehensive test suite (288 tests across 18 modules) validates every subsystem:
+While not a user-facing feature, the comprehensive test suite (293 tests across 18 modules) validates every subsystem:
 
 | Module | Tests | What's Covered |
 |--------|-------|----------------|
@@ -353,7 +354,7 @@ While not a user-facing feature, the comprehensive test suite (288 tests across 
 | `test_emoji` | 22 | UTF-8 scanning, emoji lookup, mixed text segmentation |
 | `test_navigation` | 22 | Forward/back, history stack, deep nav chains, all pairs |
 | `test_keyboard` | 20 | Matrix scan, keymap, debounce, ghost detection, LVGL mapping |
-| `test_meshtastic_support` | 18 | Meshtastic frame format, Data protobuf subset, AES-CTR crypto, channel hash, regional frequency plans, node text ingest |
+| `test_meshtastic_support` | 23 | Meshtastic frame/Data/MeshPacket protobufs, AES-CTR crypto, channel hash, regional frequency plans, node text ingest |
 | `test_battery` | 16 | mV→%, clamping, monotonicity, ADC math, edge cases |
 | `test_sdcard` | 15 | SPI init, mount, read/write, directory listing, edge cases |
 | `test_home_screen` | 15 | Home tile definitions, routing targets, layout contract |

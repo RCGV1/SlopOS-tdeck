@@ -7,6 +7,8 @@
 
 #include <AES.h>
 #include <CTR.h>
+#include <pb_decode.h>
+#include <pb_encode.h>
 #define SLOPOS_MESHTASTIC_HAS_CRYPTO 1
 
 namespace slopos {
@@ -119,86 +121,6 @@ static void putLe64(uint8_t* out, uint64_t value)
     }
 }
 
-static bool putByte(uint8_t* out, size_t out_len, size_t* pos, uint8_t value)
-{
-    if (!out || !pos || *pos >= out_len) return false;
-    out[(*pos)++] = value;
-    return true;
-}
-
-static bool putBytes(uint8_t* out, size_t out_len, size_t* pos, const uint8_t* data, size_t len)
-{
-    if (!out || !pos || (!data && len > 0) || *pos > out_len || len > out_len - *pos) return false;
-    if (len > 0) memcpy(out + *pos, data, len);
-    *pos += len;
-    return true;
-}
-
-static bool encodeVarint(uint64_t value, uint8_t* out, size_t out_len, size_t* pos)
-{
-    do {
-        uint8_t byte = static_cast<uint8_t>(value & 0x7F);
-        value >>= 7;
-        if (value) byte |= 0x80;
-        if (!putByte(out, out_len, pos, byte)) return false;
-    } while (value);
-    return true;
-}
-
-static bool decodeVarint(const uint8_t* data, size_t len, size_t* pos, uint64_t* value)
-{
-    if (!data || !pos || !value) return false;
-    uint64_t result = 0;
-    uint8_t shift = 0;
-    while (*pos < len && shift < 64) {
-        uint8_t byte = data[(*pos)++];
-        result |= static_cast<uint64_t>(byte & 0x7F) << shift;
-        if ((byte & 0x80) == 0) {
-            *value = result;
-            return true;
-        }
-        shift += 7;
-    }
-    return false;
-}
-
-static bool encodeTag(uint8_t field, uint8_t wire_type, uint8_t* out, size_t out_len, size_t* pos)
-{
-    return encodeVarint((static_cast<uint64_t>(field) << 3) | wire_type, out, out_len, pos);
-}
-
-static bool encodeFixed32Field(uint8_t field, uint32_t value, uint8_t* out, size_t out_len, size_t* pos)
-{
-    uint8_t buf[4];
-    if (!encodeTag(field, 5, out, out_len, pos)) return false;
-    putLe32(buf, value);
-    return putBytes(out, out_len, pos, buf, sizeof(buf));
-}
-
-static bool skipField(uint8_t wire_type, const uint8_t* data, size_t len, size_t* pos)
-{
-    uint64_t ignored = 0;
-    switch (wire_type) {
-    case 0:
-        return decodeVarint(data, len, pos, &ignored);
-    case 1:
-        if (*pos > len || len - *pos < 8) return false;
-        *pos += 8;
-        return true;
-    case 2:
-        if (!decodeVarint(data, len, pos, &ignored)) return false;
-        if (ignored > len - *pos) return false;
-        *pos += static_cast<size_t>(ignored);
-        return true;
-    case 5:
-        if (*pos > len || len - *pos < 4) return false;
-        *pos += 4;
-        return true;
-    default:
-        return false;
-    }
-}
-
 static bool asciiEqualsIgnoreCase(const char* a, const char* b)
 {
     if (!a || !b) return false;
@@ -293,99 +215,145 @@ bool decodeFrame(const uint8_t* data, size_t len, PacketFrame* out)
 
 bool encodeData(const DataPacket& data, uint8_t* out, size_t out_len, size_t* written)
 {
-    if (!out || !written || data.payload_len > kDataPayloadLen) return false;
-    size_t pos = 0;
-    if (!encodeTag(1, 0, out, out_len, &pos)) return false;
-    if (!encodeVarint(static_cast<uint16_t>(data.portnum), out, out_len, &pos)) return false;
-
-    if (data.payload_len > 0) {
-        if (!encodeTag(2, 2, out, out_len, &pos)) return false;
-        if (!encodeVarint(data.payload_len, out, out_len, &pos)) return false;
-        if (!putBytes(out, out_len, &pos, data.payload, data.payload_len)) return false;
-    }
-    if (data.want_response) {
-        if (!encodeTag(3, 0, out, out_len, &pos)) return false;
-        if (!encodeVarint(1, out, out_len, &pos)) return false;
-    }
-    if (data.dest && !encodeFixed32Field(4, data.dest, out, out_len, &pos)) return false;
-    if (data.source && !encodeFixed32Field(5, data.source, out, out_len, &pos)) return false;
-    if (data.request_id && !encodeFixed32Field(6, data.request_id, out, out_len, &pos)) return false;
-    if (data.reply_id && !encodeFixed32Field(7, data.reply_id, out, out_len, &pos)) return false;
-    if (data.emoji && !encodeFixed32Field(8, data.emoji, out, out_len, &pos)) return false;
-    if (data.has_bitfield) {
-        if (!encodeTag(9, 0, out, out_len, &pos)) return false;
-        if (!encodeVarint(data.bitfield, out, out_len, &pos)) return false;
-    }
-
-    *written = pos;
-    return true;
+    meshtastic_Data proto = meshtastic_Data_init_zero;
+    return toProtoData(data, &proto) && encodeProtoData(proto, out, out_len, written);
 }
 
 bool decodeData(const uint8_t* data, size_t len, DataPacket* out)
 {
-    if (!data || !out) return false;
-    *out = DataPacket{};
-    size_t pos = 0;
-    while (pos < len) {
-        uint64_t tag = 0;
-        if (!decodeVarint(data, len, &pos, &tag)) return false;
-        uint8_t field = static_cast<uint8_t>(tag >> 3);
-        uint8_t wire = static_cast<uint8_t>(tag & 0x07);
-        uint64_t value = 0;
+    meshtastic_Data proto = meshtastic_Data_init_zero;
+    return decodeProtoData(data, len, &proto) && fromProtoData(proto, out);
+}
 
-        switch (field) {
-        case 1:
-            if (wire != 0 || !decodeVarint(data, len, &pos, &value)) return false;
-            if (value > static_cast<uint16_t>(PortNum::Max)) return false;
-            out->portnum = static_cast<PortNum>(value);
-            break;
-        case 2:
-            if (wire != 2 || !decodeVarint(data, len, &pos, &value)) return false;
-            if (value > kDataPayloadLen || value > len - pos) return false;
-            out->payload_len = static_cast<size_t>(value);
-            if (out->payload_len > 0) memcpy(out->payload, data + pos, out->payload_len);
-            pos += out->payload_len;
-            break;
-        case 3:
-            if (wire != 0 || !decodeVarint(data, len, &pos, &value)) return false;
-            out->want_response = value != 0;
-            break;
-        case 4:
-            if (wire != 5 || pos > len || len - pos < 4) return false;
-            out->dest = getLe32(data + pos);
-            pos += 4;
-            break;
-        case 5:
-            if (wire != 5 || pos > len || len - pos < 4) return false;
-            out->source = getLe32(data + pos);
-            pos += 4;
-            break;
-        case 6:
-            if (wire != 5 || pos > len || len - pos < 4) return false;
-            out->request_id = getLe32(data + pos);
-            pos += 4;
-            break;
-        case 7:
-            if (wire != 5 || pos > len || len - pos < 4) return false;
-            out->reply_id = getLe32(data + pos);
-            pos += 4;
-            break;
-        case 8:
-            if (wire != 5 || pos > len || len - pos < 4) return false;
-            out->emoji = getLe32(data + pos);
-            pos += 4;
-            break;
-        case 9:
-            if (wire != 0 || !decodeVarint(data, len, &pos, &value)) return false;
-            out->has_bitfield = true;
-            out->bitfield = static_cast<uint32_t>(value);
-            break;
-        default:
-            if (!skipField(wire, data, len, &pos)) return false;
-            break;
-        }
-    }
+bool toProtoData(const DataPacket& data, meshtastic_Data* out)
+{
+    if (!out || data.payload_len > kDataPayloadLen) return false;
+    if (static_cast<uint32_t>(data.portnum) > static_cast<uint32_t>(PortNum::Max)) return false;
+    if (data.bitfield > 0xFFu) return false;
+    *out = meshtastic_Data_init_zero;
+    out->portnum = static_cast<meshtastic_PortNum>(static_cast<uint16_t>(data.portnum));
+    out->payload.size = data.payload_len;
+    if (data.payload_len > 0) memcpy(out->payload.bytes, data.payload, data.payload_len);
+    out->want_response = data.want_response;
+    out->dest = data.dest;
+    out->source = data.source;
+    out->request_id = data.request_id;
+    out->reply_id = data.reply_id;
+    out->emoji = data.emoji;
+    out->has_bitfield = data.has_bitfield;
+    out->bitfield = static_cast<uint8_t>(data.bitfield);
     return true;
+}
+
+bool fromProtoData(const meshtastic_Data& data, DataPacket* out)
+{
+    if (!out || data.payload.size > kDataPayloadLen) return false;
+    if (static_cast<uint32_t>(data.portnum) > static_cast<uint32_t>(meshtastic_PortNum_MAX)) return false;
+    *out = DataPacket{};
+    out->portnum = static_cast<PortNum>(static_cast<uint16_t>(data.portnum));
+    out->payload_len = data.payload.size;
+    if (out->payload_len > 0) memcpy(out->payload, data.payload.bytes, out->payload_len);
+    out->want_response = data.want_response;
+    out->dest = data.dest;
+    out->source = data.source;
+    out->request_id = data.request_id;
+    out->reply_id = data.reply_id;
+    out->emoji = data.emoji;
+    out->has_bitfield = data.has_bitfield;
+    out->bitfield = data.bitfield;
+    return true;
+}
+
+bool encodeProtoData(const meshtastic_Data& data, uint8_t* out, size_t out_len, size_t* written)
+{
+    return encodeProtoMessage(&meshtastic_Data_msg, &data, out, out_len, written);
+}
+
+bool decodeProtoData(const uint8_t* data, size_t len, meshtastic_Data* out)
+{
+    if (!out) return false;
+    *out = meshtastic_Data_init_zero;
+    return decodeProtoMessage(&meshtastic_Data_msg, data, len, out);
+}
+
+bool frameToMeshPacket(const PacketFrame& frame, bool payload_encrypted, meshtastic_MeshPacket* out)
+{
+    if (!out || frame.payload_len > kMaxEncryptedPayloadBytes) return false;
+    *out = meshtastic_MeshPacket_init_zero;
+    out->from = frame.header.from;
+    out->to = frame.header.to;
+    out->channel = frame.header.channel;
+    out->id = frame.header.id;
+    out->hop_limit = getHopLimit(frame.header.flags);
+    out->want_ack = getWantAck(frame.header.flags);
+    out->via_mqtt = getViaMqtt(frame.header.flags);
+    out->hop_start = getHopStart(frame.header.flags);
+    out->next_hop = frame.header.next_hop;
+    out->relay_node = frame.header.relay_node;
+    out->transport_mechanism = meshtastic_MeshPacket_TransportMechanism_TRANSPORT_LORA;
+
+    if (payload_encrypted) {
+        if (frame.payload_len > sizeof(out->encrypted.bytes)) return false;
+        out->which_payload_variant = meshtastic_MeshPacket_encrypted_tag;
+        out->encrypted.size = frame.payload_len;
+        if (frame.payload_len > 0) memcpy(out->encrypted.bytes, frame.payload, frame.payload_len);
+        return true;
+    }
+
+    out->which_payload_variant = meshtastic_MeshPacket_decoded_tag;
+    return decodeProtoData(frame.payload, frame.payload_len, &out->decoded);
+}
+
+bool meshPacketToFrame(const meshtastic_MeshPacket& packet, PacketFrame* out)
+{
+    if (!out) return false;
+    *out = PacketFrame{};
+    out->header.to = packet.to;
+    out->header.from = packet.from;
+    out->header.id = packet.id;
+    out->header.flags = makeFlags(packet.hop_limit, packet.want_ack, packet.via_mqtt, packet.hop_start);
+    out->header.channel = packet.channel;
+    out->header.next_hop = packet.next_hop;
+    out->header.relay_node = packet.relay_node;
+
+    if (packet.which_payload_variant == meshtastic_MeshPacket_encrypted_tag) {
+        if (packet.encrypted.size > kMaxEncryptedPayloadBytes) return false;
+        out->payload_len = packet.encrypted.size;
+        if (out->payload_len > 0) memcpy(out->payload, packet.encrypted.bytes, out->payload_len);
+        return true;
+    }
+    if (packet.which_payload_variant == meshtastic_MeshPacket_decoded_tag) {
+        return encodeProtoData(packet.decoded, out->payload, sizeof(out->payload), &out->payload_len);
+    }
+    return false;
+}
+
+bool encodeMeshPacketProto(const meshtastic_MeshPacket& packet, uint8_t* out, size_t out_len, size_t* written)
+{
+    return encodeProtoMessage(&meshtastic_MeshPacket_msg, &packet, out, out_len, written);
+}
+
+bool decodeMeshPacketProto(const uint8_t* data, size_t len, meshtastic_MeshPacket* out)
+{
+    if (!out) return false;
+    *out = meshtastic_MeshPacket_init_zero;
+    return decodeProtoMessage(&meshtastic_MeshPacket_msg, data, len, out);
+}
+
+bool encodeProtoMessage(const pb_msgdesc_t* fields, const void* src, uint8_t* out, size_t out_len, size_t* written)
+{
+    if (!fields || !src || !out || !written) return false;
+    pb_ostream_t stream = pb_ostream_from_buffer(out, out_len);
+    if (!pb_encode(&stream, fields, src)) return false;
+    *written = stream.bytes_written;
+    return true;
+}
+
+bool decodeProtoMessage(const pb_msgdesc_t* fields, const uint8_t* data, size_t len, void* out)
+{
+    if (!fields || !data || !out) return false;
+    pb_istream_t stream = pb_istream_from_buffer(data, len);
+    return pb_decode(&stream, fields, out);
 }
 
 bool makeTextData(const char* text, DataPacket* out)

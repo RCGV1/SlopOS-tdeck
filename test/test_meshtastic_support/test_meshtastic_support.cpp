@@ -17,17 +17,21 @@ TEST(MeshtasticSupportTest, ConstantsMatchOfficialWireLimits) {
     EXPECT_EQ(kMaxLoRaFrameBytes, 255u);
     EXPECT_EQ(kMaxEncryptedPayloadBytes, 239u);
     EXPECT_EQ(kDataPayloadLen, 233u);
+    EXPECT_EQ(kDataPayloadLen, static_cast<size_t>(meshtastic_Constants_DATA_PAYLOAD_LEN));
+    EXPECT_EQ(kDataProtoMaxBytes, static_cast<size_t>(meshtastic_Data_size));
+    EXPECT_EQ(kMeshPacketProtoMaxBytes, static_cast<size_t>(meshtastic_MeshPacket_size));
     EXPECT_EQ(kBroadcastNode, 0xFFFFFFFFu);
 }
 
 TEST(MeshtasticSupportTest, EnumValuesMatchOfficialProtoNumbers) {
-    EXPECT_EQ(static_cast<uint16_t>(PortNum::TextMessage), 1u);
-    EXPECT_EQ(static_cast<uint16_t>(PortNum::NodeInfo), 4u);
-    EXPECT_EQ(static_cast<uint16_t>(PortNum::Telemetry), 67u);
-    EXPECT_EQ(static_cast<uint16_t>(PortNum::AtakPluginV2), 78u);
-    EXPECT_EQ(static_cast<uint8_t>(RegionCode::EU868), 3u);
-    EXPECT_EQ(static_cast<uint8_t>(RegionCode::EU866), 29u);
-    EXPECT_EQ(static_cast<uint8_t>(RegionCode::EUN868), 32u);
+    EXPECT_EQ(static_cast<uint16_t>(PortNum::TextMessage), meshtastic_PortNum_TEXT_MESSAGE_APP);
+    EXPECT_EQ(static_cast<uint16_t>(PortNum::NodeInfo), meshtastic_PortNum_NODEINFO_APP);
+    EXPECT_EQ(static_cast<uint16_t>(PortNum::Telemetry), meshtastic_PortNum_TELEMETRY_APP);
+    EXPECT_EQ(static_cast<uint16_t>(PortNum::AtakPluginV2), meshtastic_PortNum_ATAK_PLUGIN_V2);
+    EXPECT_EQ(static_cast<uint8_t>(RegionCode::EU868), meshtastic_Config_LoRaConfig_RegionCode_EU_868);
+    EXPECT_EQ(static_cast<uint8_t>(RegionCode::EU866), meshtastic_Config_LoRaConfig_RegionCode_EU_866);
+    EXPECT_EQ(static_cast<uint8_t>(RegionCode::EUN868), meshtastic_Config_LoRaConfig_RegionCode_EU_N_868);
+    EXPECT_EQ(meshtastic_HardwareModel_T_ECHO_CARD, 136);
 }
 
 TEST(MeshtasticSupportTest, FlagsRoundTripIndividualBits) {
@@ -71,7 +75,7 @@ TEST(MeshtasticSupportTest, HeaderEncodesLittleEndianWireLayout) {
     EXPECT_EQ(decoded.relay_node, header.relay_node);
 }
 
-TEST(MeshtasticSupportTest, DataEncodesTextMessageAsProtoSubset) {
+TEST(MeshtasticSupportTest, DataEncodesTextMessageAsGeneratedProto) {
     DataPacket data;
     ASSERT_TRUE(makeTextData("hello", &data));
 
@@ -122,6 +126,72 @@ TEST(MeshtasticSupportTest, DataRoundTripsControlFields) {
     EXPECT_EQ(decoded.bitfield, data.bitfield);
 }
 
+TEST(MeshtasticSupportTest, DataConvertsToAndFromGeneratedProto) {
+    DataPacket data;
+    ASSERT_TRUE(makeTextData("proto bridge", &data));
+    data.want_response = true;
+    data.dest = 0x01020304u;
+    data.source = 0xA0B0C0D0u;
+    data.request_id = 0x10203040u;
+    data.reply_id = 0x11223344u;
+    data.emoji = 0x0001F44Du;
+    data.has_bitfield = true;
+    data.bitfield = 0x24u;
+
+    meshtastic_Data proto = meshtastic_Data_init_zero;
+    ASSERT_TRUE(toProtoData(data, &proto));
+    EXPECT_EQ(proto.portnum, meshtastic_PortNum_TEXT_MESSAGE_APP);
+    ASSERT_EQ(proto.payload.size, strlen("proto bridge"));
+    EXPECT_EQ(memcmp(proto.payload.bytes, "proto bridge", proto.payload.size), 0);
+    EXPECT_TRUE(proto.want_response);
+    EXPECT_EQ(proto.dest, data.dest);
+    EXPECT_EQ(proto.source, data.source);
+    EXPECT_EQ(proto.request_id, data.request_id);
+    EXPECT_EQ(proto.reply_id, data.reply_id);
+    EXPECT_EQ(proto.emoji, data.emoji);
+    EXPECT_TRUE(proto.has_bitfield);
+    EXPECT_EQ(proto.bitfield, data.bitfield);
+
+    DataPacket decoded;
+    ASSERT_TRUE(fromProtoData(proto, &decoded));
+    EXPECT_EQ(decoded.portnum, data.portnum);
+    EXPECT_EQ(decoded.payload_len, data.payload_len);
+    EXPECT_EQ(memcmp(decoded.payload, data.payload, data.payload_len), 0);
+    EXPECT_EQ(decoded.dest, data.dest);
+    EXPECT_EQ(decoded.source, data.source);
+    EXPECT_EQ(decoded.request_id, data.request_id);
+    EXPECT_EQ(decoded.reply_id, data.reply_id);
+    EXPECT_EQ(decoded.emoji, data.emoji);
+    EXPECT_EQ(decoded.bitfield, data.bitfield);
+}
+
+TEST(MeshtasticSupportTest, DecodesDataGeneratedByRealNanopbSchema) {
+    meshtastic_Data proto = meshtastic_Data_init_zero;
+    proto.portnum = meshtastic_PortNum_TEXT_MESSAGE_APP;
+    proto.payload.size = strlen("real proto");
+    memcpy(proto.payload.bytes, "real proto", proto.payload.size);
+    proto.want_response = true;
+    proto.dest = 0xCAFEBABEu;
+    proto.has_bitfield = true;
+    proto.bitfield = 0x02u;
+
+    uint8_t encoded[kDataProtoMaxBytes] = {};
+    size_t written = 0;
+    ASSERT_TRUE(encodeProtoData(proto, encoded, sizeof(encoded), &written));
+
+    DataPacket decoded;
+    ASSERT_TRUE(decodeData(encoded, written, &decoded));
+    EXPECT_EQ(decoded.portnum, PortNum::TextMessage);
+    EXPECT_TRUE(decoded.want_response);
+    EXPECT_EQ(decoded.dest, 0xCAFEBABEu);
+    EXPECT_TRUE(decoded.has_bitfield);
+    EXPECT_EQ(decoded.bitfield, 0x02u);
+
+    char text[16] = {};
+    ASSERT_TRUE(extractText(decoded, text, sizeof(text)));
+    EXPECT_STREQ(text, "real proto");
+}
+
 TEST(MeshtasticSupportTest, RejectsOversizedTextPayload) {
     char text[kDataPayloadLen + 2] = {};
     memset(text, 'x', sizeof(text) - 1);
@@ -151,6 +221,117 @@ TEST(MeshtasticSupportTest, FrameRoundTripsHeaderAndPayload) {
     EXPECT_EQ(decoded.payload_len, frame.payload_len);
     EXPECT_EQ(decoded.payload[0], 0x08);
     EXPECT_EQ(decoded.payload[1], 0x01);
+}
+
+TEST(MeshtasticSupportTest, MeshPacketProtoRoundTripsEncryptedFrame) {
+    PacketFrame frame;
+    frame.header.to = kBroadcastNode;
+    frame.header.from = 0x12345678u;
+    frame.header.id = 0x01020304u;
+    frame.header.flags = makeFlags(3, true, true, 2);
+    frame.header.channel = 0x08u;
+    frame.header.next_hop = 0x77u;
+    frame.header.relay_node = 0x88u;
+    frame.payload[0] = 0xAAu;
+    frame.payload[1] = 0xBBu;
+    frame.payload[2] = 0xCCu;
+    frame.payload_len = 3;
+
+    meshtastic_MeshPacket packet = meshtastic_MeshPacket_init_zero;
+    ASSERT_TRUE(frameToMeshPacket(frame, true, &packet));
+    EXPECT_EQ(packet.which_payload_variant, meshtastic_MeshPacket_encrypted_tag);
+    EXPECT_EQ(packet.transport_mechanism, meshtastic_MeshPacket_TransportMechanism_TRANSPORT_LORA);
+    EXPECT_EQ(packet.to, frame.header.to);
+    EXPECT_EQ(packet.from, frame.header.from);
+    EXPECT_EQ(packet.id, frame.header.id);
+    EXPECT_EQ(packet.channel, frame.header.channel);
+    EXPECT_TRUE(packet.want_ack);
+    EXPECT_TRUE(packet.via_mqtt);
+    EXPECT_EQ(packet.hop_limit, 3u);
+    EXPECT_EQ(packet.hop_start, 2u);
+    EXPECT_EQ(packet.next_hop, 0x77u);
+    EXPECT_EQ(packet.relay_node, 0x88u);
+    ASSERT_EQ(packet.encrypted.size, frame.payload_len);
+    EXPECT_EQ(memcmp(packet.encrypted.bytes, frame.payload, frame.payload_len), 0);
+
+    uint8_t encoded[kMeshPacketProtoMaxBytes] = {};
+    size_t written = 0;
+    ASSERT_TRUE(encodeMeshPacketProto(packet, encoded, sizeof(encoded), &written));
+
+    meshtastic_MeshPacket decoded = meshtastic_MeshPacket_init_zero;
+    ASSERT_TRUE(decodeMeshPacketProto(encoded, written, &decoded));
+
+    PacketFrame restored;
+    ASSERT_TRUE(meshPacketToFrame(decoded, &restored));
+    EXPECT_EQ(restored.header.to, frame.header.to);
+    EXPECT_EQ(restored.header.from, frame.header.from);
+    EXPECT_EQ(restored.header.id, frame.header.id);
+    EXPECT_EQ(restored.header.flags, frame.header.flags);
+    EXPECT_EQ(restored.header.channel, frame.header.channel);
+    EXPECT_EQ(restored.header.next_hop, frame.header.next_hop);
+    EXPECT_EQ(restored.header.relay_node, frame.header.relay_node);
+    ASSERT_EQ(restored.payload_len, frame.payload_len);
+    EXPECT_EQ(memcmp(restored.payload, frame.payload, frame.payload_len), 0);
+}
+
+TEST(MeshtasticSupportTest, MeshPacketProtoRoundTripsDecodedDataFrame) {
+    DataPacket data;
+    ASSERT_TRUE(makeTextData("decoded proto frame", &data));
+
+    PacketFrame frame;
+    frame.header.to = 0x22222222u;
+    frame.header.from = 0x11111111u;
+    frame.header.id = 0x55u;
+    frame.header.flags = makeFlags(1);
+    frame.header.channel = 0x08u;
+    ASSERT_TRUE(encodeData(data, frame.payload, sizeof(frame.payload), &frame.payload_len));
+
+    meshtastic_MeshPacket packet = meshtastic_MeshPacket_init_zero;
+    ASSERT_TRUE(frameToMeshPacket(frame, false, &packet));
+    ASSERT_EQ(packet.which_payload_variant, meshtastic_MeshPacket_decoded_tag);
+    EXPECT_EQ(packet.decoded.portnum, meshtastic_PortNum_TEXT_MESSAGE_APP);
+    ASSERT_EQ(packet.decoded.payload.size, strlen("decoded proto frame"));
+
+    PacketFrame restored;
+    ASSERT_TRUE(meshPacketToFrame(packet, &restored));
+    EXPECT_EQ(restored.header.to, frame.header.to);
+    EXPECT_EQ(restored.header.from, frame.header.from);
+    EXPECT_EQ(restored.header.id, frame.header.id);
+    EXPECT_EQ(restored.header.flags, frame.header.flags);
+    EXPECT_EQ(restored.header.channel, frame.header.channel);
+
+    DataPacket decoded;
+    ASSERT_TRUE(decodeData(restored.payload, restored.payload_len, &decoded));
+    char text[32] = {};
+    ASSERT_TRUE(extractText(decoded, text, sizeof(text)));
+    EXPECT_STREQ(text, "decoded proto frame");
+}
+
+TEST(MeshtasticSupportTest, GenericProtoHelpersRoundTripPositionMessage) {
+    meshtastic_Position position = meshtastic_Position_init_zero;
+    position.has_latitude_i = true;
+    position.latitude_i = 377749000;
+    position.has_longitude_i = true;
+    position.longitude_i = -1224194000;
+    position.has_altitude = true;
+    position.altitude = 42;
+    position.time = 1780000000u;
+    position.sats_in_view = 7;
+
+    uint8_t encoded[meshtastic_Position_size] = {};
+    size_t written = 0;
+    ASSERT_TRUE(encodeProtoMessage(&meshtastic_Position_msg, &position, encoded, sizeof(encoded), &written));
+
+    meshtastic_Position decoded = meshtastic_Position_init_zero;
+    ASSERT_TRUE(decodeProtoMessage(&meshtastic_Position_msg, encoded, written, &decoded));
+    EXPECT_TRUE(decoded.has_latitude_i);
+    EXPECT_EQ(decoded.latitude_i, position.latitude_i);
+    EXPECT_TRUE(decoded.has_longitude_i);
+    EXPECT_EQ(decoded.longitude_i, position.longitude_i);
+    EXPECT_TRUE(decoded.has_altitude);
+    EXPECT_EQ(decoded.altitude, position.altitude);
+    EXPECT_EQ(decoded.time, position.time);
+    EXPECT_EQ(decoded.sats_in_view, position.sats_in_view);
 }
 
 TEST(MeshtasticSupportTest, PresetParamsMatchLongFastAndNarrowSlow) {

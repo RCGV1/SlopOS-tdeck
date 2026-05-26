@@ -3,7 +3,7 @@
 ## Running Tests
 
 ```bash
-# Run all 288 tests on native platform (no hardware needed)
+# Run all 293 tests on native platform (no hardware needed)
 pio test -e native_test -v
 
 # Run specific test file
@@ -34,7 +34,7 @@ test/
 ├── test_map/                  # Tile math (lat/lon→tile), zoom levels
 ├── test_mesh_messaging/       # Message queue, send/receive, channel ops
 ├── test_mesh_wrapper/         # Mesh API contract, return value ranges
-├── test_meshtastic_support/   # Meshtastic wire format, crypto, regions, text node
+├── test_meshtastic_support/   # Meshtastic real protos, wire format, crypto, regions, text node
 ├── test_navigation/           # Screen routing state machine, back nav
 ├── test_pins/                 # Pin conflicts, GPIO ranges, bus consistency
 ├── test_sdcard/               # SPI init, mount, read/write, edge cases
@@ -55,7 +55,7 @@ test/
 | Emoji | 22 | UTF-8 scanning, emoji lookup, mixed text segmentation |
 | Navigation | 22 | Forward/back, history stack, deep nav, all pairs |
 | Keyboard | 20 | Matrix scan, keymap, debounce, ghost detection, LVGL mapping |
-| Meshtastic support | 18 | Frame format, Data protobuf subset, AES-CTR crypto, channel hash, regional plans, node ingest |
+| Meshtastic support | 23 | Frame/Data/MeshPacket protobufs, AES-CTR crypto, channel hash, regional plans, node ingest |
 | Battery HAL | 16 | mV→%, clamping, monotonicity, ADC math, edge cases |
 | SD Card | 15 | SPI init, mount, read/write, directory listing, edge cases |
 | Home screen | 15 | Home tile definitions, routing targets, layout contract |

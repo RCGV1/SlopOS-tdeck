@@ -728,7 +728,7 @@ onPeerDataRecv / onGroupDataRecv / onAnonDataRecv
 | `src/mesh/slop_mesh.h` | Core `SlopMesh` class — all virtual overrides, path learning, trace, ping, packet logging |
 | `src/mesh/mesh_wrapper.h` | Public API declarations — structs, function signatures |
 | `src/mesh/mesh_wrapper.cpp` | Implementation — init, loop, message queue, persistence, adverts, contacts, channels, time |
-| `src/meshtastic/` | Separate tested Meshtastic protocol support layer for frame/Data encode-decode, channel hash, crypto, and frequency planning |
+| `src/meshtastic/` | Separate tested Meshtastic protocol support layer with generated upstream protobuf bindings, frame/Data/MeshPacket encode-decode, channel hash, crypto, and frequency planning |
 | `lib/meshcore/` | MeshCore library (git submodule) — protocol implementation, Mesh base class, routing |
 | `src/hal/prefs.h` / `prefs.cpp` | `NodePrefs` — radio config, NVS storage |
 | `src/hal/tdeck_pins.h` | Pin definitions, compile-time LoRa defaults |
