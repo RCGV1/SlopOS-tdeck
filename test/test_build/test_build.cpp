@@ -35,6 +35,8 @@
 #include "hal/gps.h"
 #include "hal/sdcard.h"
 #include "mesh/mesh_wrapper.h"
+#include "meshtastic/meshtastic_node.h"
+#include "meshtastic/meshtastic_support.h"
 #include "ui/theme.h"
 #include "ui/navigation.h"
 #include "ui/home_screen.h"

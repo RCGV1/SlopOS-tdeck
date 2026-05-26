@@ -3,7 +3,7 @@
 ## Running Tests
 
 ```bash
-# Run all 161 tests on native platform (no hardware needed)
+# Run all 288 tests on native platform (no hardware needed)
 pio test -e native_test -v
 
 # Run specific test file
@@ -26,32 +26,44 @@ test/
 │   └── mesh_helpers.h         # Mock AutoDiscoverRTCClock, StdRNG
 ├── test_battery/              # Battery mV→% conversion, ADC math, edge cases
 ├── test_build/                # All headers compile together, cross-module consistency
+├── test_chat_truncation/      # Chat payload truncation and null termination
+├── test_emoji/                # UTF-8 scanning, emoji lookup, segmentation
 ├── test_gps/                  # NMEA parsing, coordinate conversion, fix detection
+├── test_home_screen/          # Home tile definitions, routing targets, layout contract
 ├── test_keyboard/             # Matrix scan, keymap, debounce, ghost detection
 ├── test_map/                  # Tile math (lat/lon→tile), zoom levels
 ├── test_mesh_messaging/       # Message queue, send/receive, channel ops
 ├── test_mesh_wrapper/         # Mesh API contract, return value ranges
+├── test_meshtastic_support/   # Meshtastic wire format, crypto, regions, text node
 ├── test_navigation/           # Screen routing state machine, back nav
 ├── test_pins/                 # Pin conflicts, GPIO ranges, bus consistency
 ├── test_sdcard/               # SPI init, mount, read/write, edge cases
+├── test_terminal/             # Terminal buffer and command contract
 ├── test_theme/                # Color constants, distinctness, brightness
-└── test_touch/                # GT911 coordinate mapping, multitouch, lifecycle
+├── test_touch/                # GT911 coordinate mapping, multitouch, lifecycle
+└── test_trackball/            # Direction debounce, deadtime, click detection
 ```
 
 ## What's Tested
 
 | Module | Tests | Coverage |
 |--------|-------|----------|
+| Mesh messaging | 26 | Message queue, send/receive, channel ops, contact export |
+| Map renderer | 25 | Tile math, zoom levels, bounding box, tile cache behavior |
+| GPS | 24 | NMEA parsing, coordinate conversion, fix detection |
 | Touch (GT911) | 22 | Coordinate mapping, multitouch, press→release, edge cases |
-| Keyboard | 19 | Matrix scan, keymap, debounce, ghost detection, LVGL mapping |
+| Emoji | 22 | UTF-8 scanning, emoji lookup, mixed text segmentation |
+| Navigation | 22 | Forward/back, history stack, deep nav, all pairs |
+| Keyboard | 20 | Matrix scan, keymap, debounce, ghost detection, LVGL mapping |
+| Meshtastic support | 18 | Frame format, Data protobuf subset, AES-CTR crypto, channel hash, regional plans, node ingest |
 | Battery HAL | 16 | mV→%, clamping, monotonicity, ADC math, edge cases |
 | SD Card | 15 | SPI init, mount, read/write, directory listing, edge cases |
-| Mesh messaging | 15 | Message queue, send/receive, channel ops, contact export |
-| Map renderer | 14 | Tile math (lat/lon→tile), zoom levels, bounding box |
-| Mesh wrapper | 13 | API signatures, return ranges, unread count init |
-| Navigation | 12 | Forward/back, history stack, deep nav, all pairs |
-| GPS | 12 | NMEA parsing, coordinate conversion, fix detection |
+| Home screen | 15 | Home tile definitions, routing targets, layout contract |
+| Mesh wrapper | 14 | API signatures, return ranges, unread count init |
+| Chat truncation | 10 | Chat payload truncation and null termination |
 | Pin definitions | 9 | GPIO range, SPI/I2C conflicts, duplicates, LoRa params |
+| Trackball | 9 | Direction debounce, deadtime, click detection, idle calibration |
+| Terminal | 7 | Terminal buffer and command contract |
 | Theme constants | 7 | Darkness, vibrancy, distinctness, readability |
 | Build integration | 7 | Header inclusion, API existence, cross-module consistency |
 

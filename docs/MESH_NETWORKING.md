@@ -728,6 +728,7 @@ onPeerDataRecv / onGroupDataRecv / onAnonDataRecv
 | `src/mesh/slop_mesh.h` | Core `SlopMesh` class — all virtual overrides, path learning, trace, ping, packet logging |
 | `src/mesh/mesh_wrapper.h` | Public API declarations — structs, function signatures |
 | `src/mesh/mesh_wrapper.cpp` | Implementation — init, loop, message queue, persistence, adverts, contacts, channels, time |
+| `src/meshtastic/` | Separate tested Meshtastic protocol support layer for frame/Data encode-decode, channel hash, crypto, and frequency planning |
 | `lib/meshcore/` | MeshCore library (git submodule) — protocol implementation, Mesh base class, routing |
 | `src/hal/prefs.h` / `prefs.cpp` | `NodePrefs` — radio config, NVS storage |
 | `src/hal/tdeck_pins.h` | Pin definitions, compile-time LoRa defaults |
@@ -742,6 +743,7 @@ onPeerDataRecv / onGroupDataRecv / onAnonDataRecv
 | [`FEATURES_OVERVIEW.md`](FEATURES_OVERVIEW.md) | High-level feature catalog — all 12 home screen tiles and system capabilities |
 | [`CHAT_SCREEN.md`](CHAT_SCREEN.md) | Chat screen UI — channel tabs, DM conversations, message history |
 | [`TERMINAL.md`](TERMINAL.md) | Terminal commands — mesh diagnostics, advert, trace, ping, inject |
+| [`MESHTASTIC_SUPPORT.md`](MESHTASTIC_SUPPORT.md) | Meshtastic protocol support boundary, API, and verification |
 | [`MISSING_FEATURES.md`](MISSING_FEATURES.md) | MeshCore protocol features not yet implemented — roadmap reference |
 | [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) | Tracked bugs, limitations, and workarounds |
 | [`AGENTS.md`](../AGENTS.md) | Full architecture guide — hardware, UI conventions, boot sequence |

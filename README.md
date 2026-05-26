@@ -6,6 +6,8 @@ Standalone off-grid LoRa mesh messaging firmware for the **LilyGo T-Deck** (ESP3
 
 Built on the [MeshCore](https://github.com/meshcore-dev/MeshCore) mesh networking protocol — fully interoperable with existing MeshCore repeaters, room servers, and companion radios.
 
+This branch also includes a tested Meshtastic protocol support layer for frame/Data encode-decode, AES-CTR payload crypto, channel hashing, regional frequency planning, and encrypted text-frame send/receive helpers. See [`docs/MESHTASTIC_SUPPORT.md`](docs/MESHTASTIC_SUPPORT.md).
+
 ## Status
 
 | Feature | Status |
@@ -19,8 +21,9 @@ Built on the [MeshCore](https://github.com/meshcore-dev/MeshCore) mesh networkin
 | Settings / Terminal / Trace screens | ✅ Complete |
 | Finder / Advertise / Onboarding wizard screens | ✅ Complete |
 | MeshCore protocol (radio, routing, encryption) | ✅ Integrated |
+| Meshtastic protocol layer (wire format, crypto, channel hash, frequency plans) | ✅ Tested |
 | T-Deck HAL (display, battery, LoRa, pins) | ✅ Complete |
-| Unit tests (13 modules) | ✅ 171 tests |
+| Unit tests (18 modules) | ✅ 288 tests |
 | Touch input driver (GT911) | ✅ Complete |
 | Keyboard input driver (I2C, ESP32-C3 MCU) | ✅ Complete |
 | Full mesh messaging (send/receive queue + UI integration) | ✅ Complete |
@@ -31,7 +34,7 @@ Built on the [MeshCore](https://github.com/meshcore-dev/MeshCore) mesh networkin
 ## Test Suite
 
 ```bash
-# Run all 171 tests on native platform (no hardware needed)
+# Run all 288 tests on native platform (no hardware needed)
 pio test -e native_test -v
 
 # Run a specific test module
@@ -40,17 +43,22 @@ pio test -e native_test -f test_battery -v
 
 | Test Module | Tests | What's Covered |
 |-------------|-------|----------------|
+| `test_mesh_messaging` | 26 | Message queue, send/receive, channel ops, contact export |
+| `test_map` | 25 | Tile math, zoom levels, bounding box, tile cache behavior |
+| `test_gps` | 24 | NMEA parsing, coordinate conversion, fix detection |
 | `test_touch` | 22 | GT911 coordinate mapping, multitouch parsing, press→release lifecycle |
+| `test_emoji` | 22 | UTF-8 scanning, emoji lookup, mixed text segmentation |
+| `test_navigation` | 22 | Forward/back with history stack, deep nav chains, all pairs |
 | `test_keyboard` | 20 | Matrix scan, keymap, debounce, ghost detection, LVGL mapping |
+| `test_meshtastic_support` | 18 | Meshtastic frame format, Data protobuf subset, AES-CTR crypto, channel hash, regional frequency plans, node text ingest |
 | `test_battery` | 16 | mV→% conversion, clamping, monotonicity, edge cases, ADC math |
 | `test_sdcard` | 15 | SPI init, mount, read/write, directory listing, edge cases |
-| `test_mesh_messaging` | 15 | Message queue, send/receive, channel ops, contact export |
-| `test_map` | 14 | Tile math (lat/lon→tile), zoom levels, bounding box |
-| `test_mesh_wrapper` | 13 | API signatures, return value ranges, unread count init |
-| `test_navigation` | 12 | Forward/back with history stack, deep nav chains, all pairs |
-| `test_gps` | 12 | NMEA parsing, coordinate conversion, fix detection |
+| `test_home_screen` | 15 | Home tile definitions, routing targets, layout contract |
+| `test_mesh_wrapper` | 14 | API signatures, return value ranges, unread count init |
+| `test_chat_truncation` | 10 | Chat payload truncation and null termination |
 | `test_trackball` | 9 | Direction debounce, deadtime, click detection, idle calibration |
 | `test_pins` | 9 | GPIO ranges, SPI/I2C bus conflicts, duplicate detection, LoRa params |
+| `test_terminal` | 7 | Terminal buffer and command contract |
 | `test_theme` | 7 | Color darkness, vibrancy, distinctness, readability hierarchy |
 | `test_build` | 7 | All headers compile together, cross-module API consistency |
 
@@ -91,6 +99,9 @@ SlopOS-tdeck/
 │   ├── mesh/
 │   │   ├── mesh_wrapper.cpp/h  ← SX1262 radio init, RTC, mesh API
 │   │   └── slop_mesh.h     ← SlopMesh : mesh::Mesh subclass
+│   ├── meshtastic/
+│   │   ├── meshtastic_support.cpp/h  ← Meshtastic wire format, crypto, regions
+│   │   └── meshtastic_node.cpp/h     ← Text-frame node helper + queue
 │   ├── app/
 │   │   └── map_renderer.cpp/h  ← Offline map tile renderer (PNG/JPEG, PSRAM canvas)
 │   ├── fonts/
@@ -106,7 +117,7 @@ SlopOS-tdeck/
 │       └── ui.cpp/h        ← Splash → Home transition
 ├── boards/t-deck.json      ← PlatformIO board definition
 ├── platformio.ini          ← Build config (ESP32-S3 + LVGL + MeshCore)
-├── test/                   ← Unit test directory (13 modules, 171 tests)
+├── test/                   ← Unit test directory (18 modules, 288 tests)
 ```
 
 ## Build & Flash
@@ -248,7 +259,7 @@ Round 2 — review-back (108K tokens):
 - CRITICAL: map image descriptor initialization, path validity via `Packet::copyPath`
 - HIGH: group text null-termination, JPEG output bounds, canvas allocation error path
 
-All fixes compiled and tested: **171/171 tests pass, ESP32 build SUCCESS (RAM 40.5%, Flash 15.9%)**
+Current branch verification: **288 native test cases (287 passed, 1 expected ESP32-platform skip), ESP32 build SUCCESS (RAM 59.9%, Flash 18.6%)**
 
 ## License
 
@@ -270,6 +281,7 @@ This project builds on and incorporates open source software from the following 
 | Project | License | Usage in SlopOS |
 |---------|---------|-----------------|
 | [MeshCore](https://github.com/meshcore-dev/MeshCore) | MIT | Mesh networking protocol (submodule at `lib/meshcore/`). Also: RTC clock (`ESP32RTCClock`), auto-off display timer, deep sleep patterns, and `NodePrefs` struct — all adapted from MeshCore's companion radio firmware. |
+| [Meshtastic Firmware](https://github.com/meshtastic/firmware) / [Protobufs](https://github.com/meshtastic/protobufs) | GPL-3.0 | Protocol reference for Meshtastic frame constants, protobuf field numbers, region tables, modem presets, channel hash, and AES-CTR nonce behavior. |
 | [LilyGo T-Deck Keyboard_ESP32C3](https://github.com/Xinyuan-LilyGO/T-Deck) | MIT | I2C keyboard protocol reference — our `keyboard.cpp` driver is based on the command set and keymap from this firmware (© 2023 Shenzhen Xin Yuan Electronic Technology Co., Ltd) |
 | [LVGL](https://github.com/lvgl/lvgl) | MIT | Embedded GUI framework (v9.3.0) |
 | [LovyanGFX](https://github.com/lovyan03/LovyanGFX) | FreeBSD | Display driver for ST7789 TFT |

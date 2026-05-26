@@ -25,6 +25,7 @@ This document catalogs every feature in the firmware — the 12-grid home screen
 - [System Features](#system-features)
   - [Display & LVGL](#display--lvgl)
   - [Mesh Networking](#mesh-networking)
+  - [Meshtastic Protocol Layer](#meshtastic-protocol-layer)
   - [Screen Navigation](#screen-navigation)
   - [Pixel Theme System](#pixel-theme-system)
   - [Responsive Layout](#responsive-layout)
@@ -57,6 +58,7 @@ This document catalogs every feature in the firmware — the 12-grid home screen
 |-------|-------------|-------------|
 | **UI** | Discord-inspired dark pixel interface, 12-tile home grid, chat, settings, and diagnostics screens | `src/ui/*` |
 | **Mesh** | Full MeshCore protocol stack — routing, encryption, group channels, direct messages | `src/mesh/*`, `lib/meshcore/` |
+| **Meshtastic** | Tested Meshtastic wire format, Data protobuf subset, channel hash, AES-CTR crypto, and regional frequency planning | `src/meshtastic/*` |
 | **HAL** | All T-Deck peripherals — display, touch, keyboard, trackball, GPS, battery, SD, buzzer, LoRa | `src/hal/*` |
 | **Apps** | Offline map renderer with PNG tile decode and LRU PSRAM cache | `src/app/*` |
 | **Boot** | Sequenced startup: board → display → mesh → UI → peripherals | `src/main.cpp` |
@@ -143,6 +145,16 @@ Signal diagnostics screen showing current RSSI, noise floor, SNR, and signal qua
 - **RTC time sync** — mesh-synchronised clock for message timestamps
 - **Advert broadcast** — manual send with optional GPS coordinates
 **Sources:** [`src/mesh/mesh_wrapper.cpp`](../src/mesh/mesh_wrapper.cpp), [`src/mesh/mesh_wrapper.h`](../src/mesh/mesh_wrapper.h), [`src/mesh/slop_mesh.h`](../src/mesh/slop_mesh.h), [`lib/meshcore/`](../lib/meshcore/)
+
+### Meshtastic Protocol Layer
+- **Packet wire format** — Meshtastic 16-byte header, LoRa frame sizing, hop/ack/MQTT flags
+- **Data protobuf subset** — text payloads plus source, destination, request, reply, emoji, and bitfield metadata
+- **Channel compatibility** — default PSK alias expansion and channel hash generation
+- **AES-CTR payload crypto** — Meshtastic nonce layout with packet ID and sender node number
+- **Regional radio plans** — modem preset parameters, frequency slot calculation, regional power limits
+- **Text node helper** — build encrypted text frames, ingest encrypted frames/bytes, queue decoded messages, reject duplicate/wrong-channel/self frames
+**Full documentation:** [`docs/MESHTASTIC_SUPPORT.md`](MESHTASTIC_SUPPORT.md)
+**Sources:** [`src/meshtastic/meshtastic_support.cpp`](../src/meshtastic/meshtastic_support.cpp), [`src/meshtastic/meshtastic_support.h`](../src/meshtastic/meshtastic_support.h), [`src/meshtastic/meshtastic_node.cpp`](../src/meshtastic/meshtastic_node.cpp), [`src/meshtastic/meshtastic_node.h`](../src/meshtastic/meshtastic_node.h), [`test/test_meshtastic_support/`](../test/test_meshtastic_support/)
 
 ### Screen Navigation
 - **Screen enum** with 14 screen IDs (Home, Chat, Contacts, Channels, Network, Heard, Map, Advertise, Settings, Trace, Terminal, Signal, RadioSetup, Onboarding)
@@ -330,21 +342,26 @@ A dedicated app-level feature bridging the display, SD card, and GPS systems.
 
 ## Test Suite
 
-While not a user-facing feature, the comprehensive test suite (171+ tests across 13 modules) validates every subsystem:
+While not a user-facing feature, the comprehensive test suite (288 tests across 18 modules) validates every subsystem:
 
 | Module | Tests | What's Covered |
 |--------|-------|----------------|
+| `test_mesh_messaging` | 26 | Message queue, send/receive, channel ops, contact export |
+| `test_map` | 25 | Tile math, zoom levels, bounding box, tile cache behavior |
+| `test_gps` | 24 | NMEA parsing, coordinate conversion, fix detection |
 | `test_touch` | 22 | GT911 coordinate mapping, multitouch, press→release lifecycle |
+| `test_emoji` | 22 | UTF-8 scanning, emoji lookup, mixed text segmentation |
+| `test_navigation` | 22 | Forward/back, history stack, deep nav chains, all pairs |
 | `test_keyboard` | 20 | Matrix scan, keymap, debounce, ghost detection, LVGL mapping |
+| `test_meshtastic_support` | 18 | Meshtastic frame format, Data protobuf subset, AES-CTR crypto, channel hash, regional frequency plans, node text ingest |
 | `test_battery` | 16 | mV→%, clamping, monotonicity, ADC math, edge cases |
 | `test_sdcard` | 15 | SPI init, mount, read/write, directory listing, edge cases |
-| `test_mesh_messaging` | 15 | Message queue, send/receive, channel ops, contact export |
-| `test_map` | 14 | Tile math (lat/lon→tile), zoom levels, bounding box |
-| `test_mesh_wrapper` | 13 | API signatures, return ranges, unread count init |
-| `test_navigation` | 12 | Forward/back, history stack, deep nav chains, all pairs |
-| `test_gps` | 12 | NMEA parsing, coordinate conversion, fix detection |
+| `test_home_screen` | 15 | Home tile definitions, routing targets, layout contract |
+| `test_mesh_wrapper` | 14 | API signatures, return ranges, unread count init |
+| `test_chat_truncation` | 10 | Chat payload truncation and null termination |
 | `test_trackball` | 9 | Direction debounce, deadtime, click detection, idle calibration |
 | `test_pins` | 9 | GPIO ranges, SPI/I2C bus conflicts, duplication, LoRa params |
+| `test_terminal` | 7 | Terminal buffer and command contract |
 | `test_theme` | 7 | Color darkness, vibrancy, distinctness, readability hierarchy |
 | `test_build` | 7 | All headers compile together, cross-module API consistency |
 
@@ -361,6 +378,7 @@ See [`test/README.md`](../test/README.md) for full documentation.
 | [`CONTRIBUTING.md`](../CONTRIBUTING.md) | Contribution workflow, PR checklist, coding standards |
 | [`docs/KNOWN_ISSUES.md`](KNOWN_ISSUES.md) | Tracked bugs, fixes, and workarounds |
 | [`docs/MAP_SCREEN.md`](MAP_SCREEN.md) | Map screen and tile cache system documentation |
+| [`docs/MESHTASTIC_SUPPORT.md`](MESHTASTIC_SUPPORT.md) | Meshtastic protocol layer and test coverage |
 | [`docs/MISSING_FEATURES.md`](MISSING_FEATURES.md) | MeshCore protocol features not yet implemented, with effort estimates |
 | [`test/README.md`](../test/README.md) | Test suite structure, mock guidelines, running tests |
 | [`firmware/README.md`](../firmware/README.md) | Flash instructions, binary layout, web flasher |
