@@ -6,7 +6,7 @@ Standalone off-grid LoRa mesh messaging firmware for the **LilyGo T-Deck** (ESP3
 
 Built on the [MeshCore](https://github.com/meshcore-dev/MeshCore) mesh networking protocol — fully interoperable with existing MeshCore repeaters, room servers, and companion radios.
 
-This branch also includes a tested Meshtastic protocol support layer with real upstream protobuf bindings, frame/Data/MeshPacket encode-decode, AES-CTR payload crypto, channel hashing, regional frequency planning, and encrypted text-frame send/receive helpers. See [`docs/MESHTASTIC_SUPPORT.md`](docs/MESHTASTIC_SUPPORT.md).
+This fork also includes a switchable Meshtastic mode using real upstream protobuf bindings, frame/Data/MeshPacket encode-decode, AES-CTR payload crypto, channel hashing, regional frequency planning, encrypted text send/receive, NodeInfo/Position ingestion, and a Settings protocol selector. See [`docs/MESHTASTIC_SUPPORT.md`](docs/MESHTASTIC_SUPPORT.md).
 
 ## Status
 
@@ -21,9 +21,10 @@ This branch also includes a tested Meshtastic protocol support layer with real u
 | Settings / Terminal / Trace screens | ✅ Complete |
 | Finder / Advertise / Onboarding wizard screens | ✅ Complete |
 | MeshCore protocol (radio, routing, encryption) | ✅ Integrated |
-| Meshtastic protocol layer (real protos, wire format, crypto, channel hash, frequency plans) | ✅ Tested |
+| Meshtastic runtime mode (real protos, wire format, crypto, NodeInfo, text, frequency plans) | ✅ Integrated |
+| Settings protocol selector (MeshCore / Meshtastic) | ✅ Complete |
 | T-Deck HAL (display, battery, LoRa, pins) | ✅ Complete |
-| Unit tests (18 modules) | ✅ 293 tests |
+| Unit tests (18 modules) | ✅ 295 tests |
 | Touch input driver (GT911) | ✅ Complete |
 | Keyboard input driver (I2C, ESP32-C3 MCU) | ✅ Complete |
 | Full mesh messaging (send/receive queue + UI integration) | ✅ Complete |
@@ -34,7 +35,7 @@ This branch also includes a tested Meshtastic protocol support layer with real u
 ## Test Suite
 
 ```bash
-# Run all 293 tests on native platform (no hardware needed)
+# Run all 295 tests on native platform (no hardware needed)
 pio test -e native_test -v
 
 # Run a specific test module
@@ -50,11 +51,11 @@ pio test -e native_test -f test_battery -v
 | `test_emoji` | 22 | UTF-8 scanning, emoji lookup, mixed text segmentation |
 | `test_navigation` | 22 | Forward/back with history stack, deep nav chains, all pairs |
 | `test_keyboard` | 20 | Matrix scan, keymap, debounce, ghost detection, LVGL mapping |
-| `test_meshtastic_support` | 23 | Meshtastic frame/Data/MeshPacket protobufs, AES-CTR crypto, channel hash, regional frequency plans, node text ingest |
+| `test_meshtastic_support` | 24 | Meshtastic frame/Data/MeshPacket protobufs, AES-CTR crypto, channel hash, regional frequency plans, node ingest/contact export |
 | `test_battery` | 16 | mV→% conversion, clamping, monotonicity, edge cases, ADC math |
 | `test_sdcard` | 15 | SPI init, mount, read/write, directory listing, edge cases |
 | `test_home_screen` | 15 | Home tile definitions, routing targets, layout contract |
-| `test_mesh_wrapper` | 14 | API signatures, return value ranges, unread count init |
+| `test_mesh_wrapper` | 15 | API signatures, protocol mode helpers, return value ranges, unread count init |
 | `test_chat_truncation` | 10 | Chat payload truncation and null termination |
 | `test_trackball` | 9 | Direction debounce, deadtime, click detection, idle calibration |
 | `test_pins` | 9 | GPIO ranges, SPI/I2C bus conflicts, duplicate detection, LoRa params |
@@ -119,7 +120,7 @@ SlopOS-tdeck/
 │       └── ui.cpp/h        ← Splash → Home transition
 ├── boards/t-deck.json      ← PlatformIO board definition
 ├── platformio.ini          ← Build config (ESP32-S3 + LVGL + MeshCore)
-├── test/                   ← Unit test directory (18 modules, 293 tests)
+├── test/                   ← Unit test directory (18 modules, 295 tests)
 ```
 
 ## Build & Flash
@@ -261,7 +262,7 @@ Round 2 — review-back (108K tokens):
 - CRITICAL: map image descriptor initialization, path validity via `Packet::copyPath`
 - HIGH: group text null-termination, JPEG output bounds, canvas allocation error path
 
-Current branch verification: **293 native test cases (292 passed, 1 expected ESP32-platform skip), ESP32 build SUCCESS (RAM 59.9%, Flash 18.6%)**
+Current branch verification: **295 native test cases (294 passed, 1 expected ESP32-platform skip), ESP32 build SUCCESS (RAM 62.5%, Flash 19.1%)**
 
 ## License
 

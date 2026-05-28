@@ -143,7 +143,7 @@ Commands: help status advert ping emoji-list
 
 ### `status`
 
-Displays real-time mesh radio statistics obtained from the MeshCore layer.
+Displays real-time mesh radio statistics obtained from the active protocol backend.
 
 **Syntax**:
 ```
@@ -153,7 +153,7 @@ status
 **Example Output**:
 ```
 > status
-RSSI:-67dBm SNR:12.3dB Noise:-98dBm  Contacts:3 Channels:5
+MeshCore RSSI:-67dBm SNR:12.3dB Noise:-98dBm  Contacts:3 Channels:5
 ```
 
 **Fields**:
@@ -163,6 +163,7 @@ RSSI:-67dBm SNR:12.3dB Noise:-98dBm  Contacts:3 Channels:5
 | `RSSI` | `slopos::mesh::getLastRSSI()` | Received Signal Strength Indicator of the last packet, in dBm. Typical range: -30 (very strong) to -120 (very weak). |
 | `SNR` | `slopos::mesh::getLastSNR()` | Signal-to-Noise Ratio of the last packet, in dB. Higher values indicate a cleaner signal. |
 | `Noise` | `slopos::mesh::getNoiseFloor()` | Current noise floor measurement, in dBm. Lower (more negative) values indicate a quieter RF environment. |
+| `Protocol` | `slopos::mesh::getProtocolModeName()` | Active backend name, currently `MeshCore` or `Meshtastic`. |
 | `Contacts` | `slopos::mesh::getContactCount()` | Number of unique mesh nodes this device has discovered and stored. |
 | `Channels` | `slopos::mesh::getChannelCount()` | Number of active mesh channels known to this node. |
 
@@ -307,15 +308,23 @@ When the Terminal screen is first opened, four or five initial lines are printed
 
 ```
 SlopOS T-Deck Terminal
-MeshCore protocol active
+<active protocol> protocol active
 Radio: SX1262 868.000 MHz configured     ← (if configured)
 ```
 
-Or, if the radio has not been configured:
+In Meshtastic mode:
 
 ```
 SlopOS T-Deck Terminal
-MeshCore protocol active
+Meshtastic protocol active
+Meshtastic: LongFast / LONG_FAST
+```
+
+Or, if MeshCore radio has not been configured:
+
+```
+SlopOS T-Deck Terminal
+<active protocol> protocol active
 Radio: ERROR - not configured
 ```
 
@@ -324,11 +333,12 @@ Radio: ERROR - not configured
 | # | Line | Colour | Condition |
 |---|---|---|---|
 | 1 | `SlopOS T-Deck Terminal` | `#00ff00` (default fallback) | Always |
-| 2 | `MeshCore protocol active` | `#00ff00` (default fallback) | Always |
-| 3 | `Radio: SX1262 <freq> MHz configured` | `#00bfff` (Accent Cyan — contains MHz) | `NodePrefs.configured == true` |
-| 3 | `Radio: ERROR - not configured` | `#ed4245` (Accent Red — contains ERROR) | `NodePrefs.configured == false` |
+| 2 | `<active protocol> protocol active` | `#00ff00` (default fallback) | Always |
+| 3 | `Radio: SX1262 <freq> MHz configured` | `#00bfff` (Accent Cyan — contains MHz) | `NodePrefs.protocol_mode == MeshCore && NodePrefs.configured == true` |
+| 3 | `Meshtastic: <channel> / <preset>` | `#00ff00` (default fallback) | `NodePrefs.protocol_mode == Meshtastic` |
+| 3 | `Radio: ERROR - not configured` | `#ed4245` (Accent Red — contains ERROR) | `NodePrefs.protocol_mode == MeshCore && NodePrefs.configured == false` |
 
-The radio configuration line reads from `slopos::prefs_get()` at the moment the Terminal screen is created.
+The protocol line reads from `slopos::mesh::getProtocolModeName()`. The MeshCore radio line or Meshtastic channel/preset line reads from `slopos::prefs_get()` at the moment the Terminal screen is created.
 
 ---
 
@@ -398,7 +408,7 @@ Colours referenced by the Terminal screen, defined in `src/ui/theme.h`:
 | Command | Purpose | Typical Output | Colour |
 |---|---|---|---|
 | `help` | List available commands | `Commands: help status advert ping emoji-list` | Default green |
-| `status` | Show mesh radio diagnostics | `RSSI:-67dBm SNR:12.3dB Noise:-98dBm Contacts:3 Channels:5` | Accent Cyan |
+| `status` | Show mesh radio diagnostics | `MeshCore RSSI:-67dBm SNR:12.3dB Noise:-98dBm Contacts:3 Channels:5` | Accent Cyan |
 | `advert` | Broadcast advert | `Advert sent` or `Send failed` | Green / Red |
 | `ping` | Device responsiveness + uptime | `Pong! Uptime: 734152ms` | Accent Green |
 | `emoji-list` | Print all 362 emoji | ~48 lines of emoji rows | Default green |

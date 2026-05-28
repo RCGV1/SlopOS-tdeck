@@ -2,7 +2,7 @@
 
 **SlopOS-TDeck's mesh networking layer — architecture, protocol integration, and feature reference.**
 
-The firmware implements a full MeshCore protocol stack on the LilyGo T-Deck (ESP32-S3 + SX1262 LoRa radio). The mesh layer is built around `SlopMesh`, a minimal `mesh::Mesh` subclass, with a clean wrapper API (`mesh_wrapper.h/cpp`) that the LVGL UI and terminal interface consume.
+The firmware implements a full MeshCore protocol stack on the LilyGo T-Deck (ESP32-S3 + SX1262 LoRa radio). This fork also lets `mesh_wrapper.h/cpp` boot a Meshtastic runtime mode selected from Settings. MeshCore remains the default; Meshtastic mode uses the same SlopOS UI surfaces with a separate protobuf-backed backend.
 
 ---
 
@@ -63,19 +63,17 @@ The firmware implements a full MeshCore protocol stack on the LilyGo T-Deck (ESP
 ┌────────────────────▼────────────────────────────────────┐
 │                 mesh_wrapper.h/cpp                        │
 │   Public API layer: init, send, poll, contacts, channels  │
-│   Message queue, identity persistence, NVS channel store   │
+│   Active protocol facade: MeshCore or Meshtastic           │
 └────────────────────┬────────────────────────────────────┘
                      │ owns
 ┌────────────────────▼────────────────────────────────────┐
-│                    SlopMesh (slop_mesh.h)                 │
-│   mesh::Mesh subclass: routing, channels, crypto,         │
-│   contact list, trace, ping, packet logging               │
+│     SlopMesh (slop_mesh.h) or MeshtasticNode              │
+│   Protocol-specific routing/framing, contacts, logs       │
 └────────────────────┬────────────────────────────────────┘
-                     │ inherits
+                     │ uses, depending on active mode
 ┌────────────────────▼────────────────────────────────────┐
-│                  MeshCore (lib/meshcore/)                  │
-│   Protocol core: Mesh, PacketManager, Dispatcher,         │
-│   Radio wrappers, encryption, routing tables              │
+│ MeshCore library or generated Meshtastic protobuf helpers │
+│   MeshCore routing/encryption or Meshtastic framing       │
 └────────────────────┬────────────────────────────────────┘
                      │ drives
 ┌────────────────────▼────────────────────────────────────┐
@@ -727,10 +725,10 @@ onPeerDataRecv / onGroupDataRecv / onAnonDataRecv
 |------|---------|
 | `src/mesh/slop_mesh.h` | Core `SlopMesh` class — all virtual overrides, path learning, trace, ping, packet logging |
 | `src/mesh/mesh_wrapper.h` | Public API declarations — structs, function signatures |
-| `src/mesh/mesh_wrapper.cpp` | Implementation — init, loop, message queue, persistence, adverts, contacts, channels, time |
-| `src/meshtastic/` | Separate tested Meshtastic protocol support layer with generated upstream protobuf bindings, frame/Data/MeshPacket encode-decode, channel hash, crypto, and frequency planning |
+| `src/mesh/mesh_wrapper.cpp` | Implementation — protocol mode selection, init, loop, message queue, persistence, adverts, contacts, channels, time |
+| `src/meshtastic/` | Switchable Meshtastic runtime support layer with generated upstream protobuf bindings, frame/Data/MeshPacket encode-decode, channel hash, crypto, NodeInfo/Position, and frequency planning |
 | `lib/meshcore/` | MeshCore library (git submodule) — protocol implementation, Mesh base class, routing |
-| `src/hal/prefs.h` / `prefs.cpp` | `NodePrefs` — radio config, NVS storage |
+| `src/hal/prefs.h` / `prefs.cpp` | `NodePrefs` — protocol mode, radio config, Meshtastic config, NVS storage |
 | `src/hal/tdeck_pins.h` | Pin definitions, compile-time LoRa defaults |
 | `src/main.cpp` | Boot sequence — init order and dependencies |
 

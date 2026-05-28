@@ -7,6 +7,7 @@ The Settings screen provides a tappable list of device status indicators and con
 │          Settings                │  ← top bar + back button
 ├──────────────────────────────────┤
 │ ⚙  Name: SlopOS T-Deck          │  ← Node name (read-only)
+│ ⚙  Protocol: MeshCore           │  ← tappable → MeshCore/Meshtastic selector
 │ 📶 Radio: 869.618 MHz / 62.5 kHz│  ← tappable → Radio Setup screen
 │      / SF8 / 22 dBm              │
 │ 💾 SD Card: Mounted              │  ← status read-only
@@ -34,6 +35,7 @@ The Settings screen provides a tappable list of device status indicators and con
 | `src/ui/responsive.h` | `dialog_size()` — caps dialog dimensions to display bounds with margin |
 | `src/ui/theme.h` | Pixel theme colours — `BG_TERTIARY`, `BG_INPUT`, `TEXT_PRIMARY` for alternating rows |
 | `src/hal/prefs.h` | `NodePrefs` struct — all persisted configuration fields |
+| `src/mesh/mesh_wrapper.h` / `.cpp` | Active protocol name and protocol mode API |
 | `src/hal/tdeck_pins.h` | `SLOPOS_VERSION` macro at line 130 |
 | `src/hal/sdcard.h` | `slopos_sdcard_mounted()` — SD card status check |
 | `src/hal/gps.h` | `slopos_gps_has_fix()` — GPS fix status check |
@@ -90,18 +92,33 @@ Displays the mesh node's name as configured during onboarding or via NVS prefere
 
 ---
 
-### 2. Radio Configuration
+### 2. Protocol Mode
 
 | Property | Value |
 |----------|-------|
-| **Label** | `"  Radio: <freq> MHz / <bw> kHz / SF<sf> / <power> dBm"` (line 1189) |
-| **Data source** | `slopos::prefs_get()` — `freq`, `bw`, `sf`, `tx_power_dbm` |
+| **Label** | `"  Protocol: MeshCore"` or `"  Protocol: Meshtastic"` |
+| **Data source** | `slopos::mesh::getProtocolModeName()` backed by `NodePrefs.protocol_mode` |
+| **Tap action** | Opens the protocol selector dialog |
+| **Symbol** | `LV_SYMBOL_SETTINGS` |
+
+The selector offers MeshCore and Meshtastic. Saving persists the selected protocol mode, saves chat history, waits briefly, and restarts the ESP32 so the radio stack boots cleanly into the selected backend.
+
+MeshCore remains the default. Meshtastic mode uses the Meshtastic region, modem preset, channel name, PSK, and hop limit stored in `NodePrefs`.
+
+### 3. Radio Configuration
+
+| Property | Value |
+|----------|-------|
+| **Label** | MeshCore: `"  Radio: <freq> MHz / <bw> kHz / SF<sf> / <power> dBm"`; Meshtastic: `"  Meshtastic: <region> / <preset> / <channel>"` |
+| **Data source** | `slopos::prefs_get()` — MeshCore `freq`, `bw`, `sf`, `tx_power_dbm`; Meshtastic `meshtastic_region`, `meshtastic_preset`, `meshtastic_channel` |
 | **Tap action** | Opens `radio_setup_screen_show()` — see [Radio Setup Dialog](#radio-setup-dialog) |
 | **Symbol** | `LV_SYMBOL_WIFI` (📶) |
 
-#### Not Configured State
+When Meshtastic mode is selected, the row summarizes Meshtastic settings rather than MeshCore LoRa parameters. The firmware derives Meshtastic frequency, bandwidth, spreading factor, coding rate, and power from the selected Meshtastic region and modem preset.
 
-When `p.configured = false`, the row shows a red warning (`#4A2020` background) and the unconfigured text (line 1192):
+#### MeshCore Not Configured State
+
+When MeshCore is active and `p.configured = false`, the row shows a red warning (`#4A2020` background) and the unconfigured text:
 
 ```
 Radio: NOT CONFIGURED — tap to configure
@@ -126,7 +143,7 @@ The `radio_setup_screen_show()` function at line 1899 creates a full-screen "Rad
 
 ---
 
-### 3. SD Card Status
+### 4. SD Card Status
 
 | Property | Value |
 |----------|-------|
@@ -139,7 +156,7 @@ Shows whether the microSD card is detected and mounted at boot. The SD card uses
 
 ---
 
-### 4. GPS Status
+### 5. GPS Status
 
 | Property | Value |
 |----------|-------|
@@ -152,7 +169,7 @@ Indicates whether the GPS module (UART, RX=43, TX=44, 38400 baud) has acquired a
 
 ---
 
-### 5. Keyboard Backlight
+### 6. Keyboard Backlight
 
 | Property | Value |
 |----------|-------|
@@ -198,7 +215,7 @@ struct BacklightCtx {
 
 ---
 
-### 6. Chat History Cap
+### 7. Chat History Cap
 
 | Property | Value |
 |----------|-------|
@@ -249,7 +266,7 @@ On save, all channel buffers are trimmed via `trim_channel_history()` to respect
 
 ---
 
-### 7. Date
+### 8. Date
 
 | Property | Value |
 |----------|-------|
@@ -259,7 +276,7 @@ On save, all channel buffers are trimmed via `trim_channel_history()` to respect
 | **Symbol** | `LV_SYMBOL_SETTINGS` (⚙) |
 | **Global pointer** | `g_date_row` — updated on set |
 
-### 8. Time
+### 9. Time
 
 | Property | Value |
 |----------|-------|
@@ -312,7 +329,7 @@ struct DateTimeDialogCtx {
 
 ---
 
-### 9. Run Setup Wizard
+### 10. Run Setup Wizard
 
 | Property | Value |
 |----------|-------|
@@ -324,7 +341,7 @@ Allows the user to re-run the setup wizard at any time. This navigates to `Scree
 
 ---
 
-### 10. Version Info
+### 11. Version Info
 
 | Property | Value |
 |----------|-------|

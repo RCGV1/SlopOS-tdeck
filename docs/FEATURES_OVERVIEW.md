@@ -57,8 +57,8 @@ This document catalogs every feature in the firmware — the 12-grid home screen
 | Layer | Description | Key Sources |
 |-------|-------------|-------------|
 | **UI** | Discord-inspired dark pixel interface, 12-tile home grid, chat, settings, and diagnostics screens | `src/ui/*` |
-| **Mesh** | Full MeshCore protocol stack — routing, encryption, group channels, direct messages | `src/mesh/*`, `lib/meshcore/` |
-| **Meshtastic** | Tested Meshtastic wire format, generated upstream protobuf bindings, channel hash, AES-CTR crypto, and regional frequency planning | `src/meshtastic/*` |
+| **Mesh** | Full MeshCore protocol stack plus a runtime facade for switchable protocol mode | `src/mesh/*`, `lib/meshcore/` |
+| **Meshtastic** | Switchable runtime mode with generated upstream protobuf bindings, channel hash, AES-CTR crypto, regional frequency planning, text, NodeInfo, and Position support | `src/meshtastic/*` |
 | **HAL** | All T-Deck peripherals — display, touch, keyboard, trackball, GPS, battery, SD, buzzer, LoRa | `src/hal/*` |
 | **Apps** | Offline map renderer with PNG tile decode and LRU PSRAM cache | `src/app/*` |
 | **Boot** | Sequenced startup: board → display → mesh → UI → peripherals | `src/main.cpp` |
@@ -146,14 +146,15 @@ Signal diagnostics screen showing current RSSI, noise floor, SNR, and signal qua
 - **Advert broadcast** — manual send with optional GPS coordinates
 **Sources:** [`src/mesh/mesh_wrapper.cpp`](../src/mesh/mesh_wrapper.cpp), [`src/mesh/mesh_wrapper.h`](../src/mesh/mesh_wrapper.h), [`src/mesh/slop_mesh.h`](../src/mesh/slop_mesh.h), [`lib/meshcore/`](../lib/meshcore/)
 
-### Meshtastic Protocol Layer
+### Meshtastic Runtime Mode
 - **Packet wire format** — Meshtastic 16-byte header, LoRa frame sizing, hop/ack/MQTT flags
 - **Real protobuf bindings** — official Meshtastic nanopb schema for Data, MeshPacket, Position, telemetry, admin, channel, device, MQTT, and module messages
 - **Data/MeshPacket helpers** — convert LoRa frames to generated `meshtastic_Data` / `meshtastic_MeshPacket`, with generic nanopb encode/decode helpers for other generated message types
 - **Channel compatibility** — default PSK alias expansion and channel hash generation
 - **AES-CTR payload crypto** — Meshtastic nonce layout with packet ID and sender node number
 - **Regional radio plans** — modem preset parameters, frequency slot calculation, regional power limits
-- **Text node helper** — build encrypted text frames, ingest encrypted frames/bytes, queue decoded messages, reject duplicate/wrong-channel/self frames
+- **Runtime UI switch** — Settings can restart into MeshCore or Meshtastic mode
+- **Text and contact helper** — build encrypted broadcast/unicast text frames, ingest text/NodeInfo/Position frames, queue decoded messages, and export contacts
 **Full documentation:** [`docs/MESHTASTIC_SUPPORT.md`](MESHTASTIC_SUPPORT.md)
 **Sources:** [`src/meshtastic/generated/`](../src/meshtastic/generated/), [`src/meshtastic/meshtastic_support.cpp`](../src/meshtastic/meshtastic_support.cpp), [`src/meshtastic/meshtastic_support.h`](../src/meshtastic/meshtastic_support.h), [`src/meshtastic/meshtastic_node.cpp`](../src/meshtastic/meshtastic_node.cpp), [`src/meshtastic/meshtastic_node.h`](../src/meshtastic/meshtastic_node.h), [`test/test_meshtastic_support/`](../test/test_meshtastic_support/)
 
@@ -343,7 +344,7 @@ A dedicated app-level feature bridging the display, SD card, and GPS systems.
 
 ## Test Suite
 
-While not a user-facing feature, the comprehensive test suite (293 tests across 18 modules) validates every subsystem:
+While not a user-facing feature, the comprehensive test suite (295 tests across 18 modules) validates every subsystem:
 
 | Module | Tests | What's Covered |
 |--------|-------|----------------|
@@ -354,11 +355,11 @@ While not a user-facing feature, the comprehensive test suite (293 tests across 
 | `test_emoji` | 22 | UTF-8 scanning, emoji lookup, mixed text segmentation |
 | `test_navigation` | 22 | Forward/back, history stack, deep nav chains, all pairs |
 | `test_keyboard` | 20 | Matrix scan, keymap, debounce, ghost detection, LVGL mapping |
-| `test_meshtastic_support` | 23 | Meshtastic frame/Data/MeshPacket protobufs, AES-CTR crypto, channel hash, regional frequency plans, node text ingest |
+| `test_meshtastic_support` | 24 | Meshtastic frame/Data/MeshPacket protobufs, AES-CTR crypto, channel hash, regional frequency plans, node text ingest/contact export |
 | `test_battery` | 16 | mV→%, clamping, monotonicity, ADC math, edge cases |
 | `test_sdcard` | 15 | SPI init, mount, read/write, directory listing, edge cases |
 | `test_home_screen` | 15 | Home tile definitions, routing targets, layout contract |
-| `test_mesh_wrapper` | 14 | API signatures, return ranges, unread count init |
+| `test_mesh_wrapper` | 15 | API signatures, protocol mode helpers, return ranges, unread count init |
 | `test_chat_truncation` | 10 | Chat payload truncation and null termination |
 | `test_trackball` | 9 | Direction debounce, deadtime, click detection, idle calibration |
 | `test_pins` | 9 | GPIO ranges, SPI/I2C bus conflicts, duplication, LoRa params |
@@ -379,7 +380,7 @@ See [`test/README.md`](../test/README.md) for full documentation.
 | [`CONTRIBUTING.md`](../CONTRIBUTING.md) | Contribution workflow, PR checklist, coding standards |
 | [`docs/KNOWN_ISSUES.md`](KNOWN_ISSUES.md) | Tracked bugs, fixes, and workarounds |
 | [`docs/MAP_SCREEN.md`](MAP_SCREEN.md) | Map screen and tile cache system documentation |
-| [`docs/MESHTASTIC_SUPPORT.md`](MESHTASTIC_SUPPORT.md) | Meshtastic protocol layer and test coverage |
+| [`docs/MESHTASTIC_SUPPORT.md`](MESHTASTIC_SUPPORT.md) | Meshtastic runtime mode and test coverage |
 | [`docs/MISSING_FEATURES.md`](MISSING_FEATURES.md) | MeshCore protocol features not yet implemented, with effort estimates |
 | [`test/README.md`](../test/README.md) | Test suite structure, mock guidelines, running tests |
 | [`firmware/README.md`](../firmware/README.md) | Flash instructions, binary layout, web flasher |

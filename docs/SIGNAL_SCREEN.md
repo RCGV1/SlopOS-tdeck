@@ -1,6 +1,6 @@
 # Signal Screen
 
-The Signal screen is a read-only dashboard displaying real-time radio statistics and current LoRa configuration. It provides a snapshot of link quality (RSSI, SNR, noise floor) alongside the operational parameters (frequency, bandwidth, spreading factor, coding rate, TX power).
+The Signal screen is a read-only dashboard displaying real-time radio statistics and the active protocol's LoRa configuration. It provides a snapshot of link quality (RSSI, SNR, noise floor) alongside MeshCore radio parameters or Meshtastic region/preset/channel details.
 
 ---
 
@@ -10,8 +10,8 @@ The Signal screen is a read-only dashboard displaying real-time radio statistics
 |------|---------|
 | `src/ui/screens.cpp` | Implementation — `signal_screen_show()` at line 691 |
 | `src/ui/screens.h` | Public API — `signal_screen_show()` declaration |
-| `src/mesh/mesh_wrapper.h` / `.cpp` | Runtime mesh queries — `getLastRSSI()`, `getLastSNR()`, `getNoiseFloor()` |
-| `src/hal/prefs.h` / `.cpp` | Persisted `NodePrefs` (frequency, bandwidth, SF, CR, TX power) |
+| `src/mesh/mesh_wrapper.h` / `.cpp` | Runtime mesh queries — `getLastRSSI()`, `getLastSNR()`, `getNoiseFloor()`, `getProtocolModeName()` |
+| `src/hal/prefs.h` / `.cpp` | Persisted `NodePrefs` (protocol mode, MeshCore radio config, Meshtastic region/preset/channel) |
 
 ---
 
@@ -60,6 +60,8 @@ The Signal screen is a read-only dashboard displaying real-time radio statistics
 | **Coding Rate** | `p.cr` | `5` | Displayed as `4/5` (4 data bits + CR error-correction bits) |
 | **TX Power** | `p.tx_power_dbm` | `20 dBm` | Transmit power in dBm |
 
+When Meshtastic mode is active, the screen shows the protocol name plus Meshtastic region, modem preset, channel name, derived frequency, and TX power. MeshCore's manual bandwidth/SF/CR fields are not shown because they are derived from Meshtastic's preset table.
+
 ### Unconfigured State
 
 If the radio has not been configured (`p.configured == false`), the display reads:
@@ -90,8 +92,9 @@ The user must navigate to **Settings > Radio** (`radio_setup_screen_show()`) to 
 3. Reads persisted `NodePrefs` via `slopos::prefs_get()`.
 4. Composes a single multi-line label centred in the content area with `lv_font_montserrat_12`.
 5. Conditional formatting:
-   - **Configured** (`p.configured == true`): displays all 8 metrics (RSSI, SNR, noise, freq, BW, SF, CR, TX power).
-   - **Unconfigured** (`p.configured == false`): only shows RSSI, SNR, noise floor plus a notice directing the user to the Radio setup screen.
+   - **MeshCore configured** (`p.configured == true`): displays RSSI, SNR, noise, protocol, freq, BW, SF, CR, and TX power.
+   - **MeshCore unconfigured** (`p.configured == false`): shows RSSI, SNR, noise floor plus a notice directing the user to the Radio setup screen.
+   - **Meshtastic**: displays RSSI, SNR, noise, protocol, region, preset, channel, derived frequency, and TX power.
 6. Displays the screen via `show_screen(scr)` (slide-in animation).
 
 ### Update Behaviour
